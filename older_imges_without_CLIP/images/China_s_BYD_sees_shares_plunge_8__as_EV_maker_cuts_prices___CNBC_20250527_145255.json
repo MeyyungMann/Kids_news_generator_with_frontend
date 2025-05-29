@@ -1,0 +1,8 @@
+{
+  "prompt": "Create a kid-friendly illustration about China's BYD sees shares plunge 8% as EV maker cuts prices - CNBC. Generate a kid-friendly news article about China's BYD sees shares plunge 8% as EV maker cuts prices... Style: colorful cartoon style, fun characters, educational illustration, kid-friendly, educational, safe for children",
+  "negative_prompt": "scary, violent, inappropriate, complex, realistic, photorealistic, dark, scary, frightening",
+  "age_group": 7,
+  "topic": "China's BYD sees shares plunge 8% as EV maker cuts prices - CNBC",
+  "timestamp": "20250527_145255",
+  "image_path": "results\\images\\China_s_BYD_sees_shares_plunge_8__as_EV_maker_cuts_prices___CNBC_20250527_145255.png"
+}

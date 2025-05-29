@@ -1,0 +1,511 @@
+# cd backend/src
+# python -m uvicorn app:app --reload
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pathlib import Path
+import json
+import logging
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+from pydantic import BaseModel
+from news_api_handler import NewsAPIHandler
+from ml_pipeline import KidsNewsGenerator  # Import the KidsNewsGenerator
+from image_generator import KidFriendlyImageGenerator  # Import the KidFriendlyImageGenerator
+from config import Config  # Import the config
+from fastapi.staticfiles import StaticFiles
+from web_search import WebSearcher
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Create FastAPI app
+app = FastAPI(title="Kids News Generator API")
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize handlers
+news_handler = None
+generator = None
+image_generator = None
+web_searcher = None
+
+# Add this function to create necessary directories
+def create_directories():
+    """Create necessary directories for the application."""
+    base_dir = Path(__file__).parent.parent
+    results_dir = base_dir / "results"
+    images_dir = results_dir / "images"
+    summaries_dir = results_dir / "summaries"
+    
+    # Create category directories
+    categories = ["Science", "Technology", "Environment", "Health", "Economy"]
+    for category in categories:
+        (images_dir / category).mkdir(parents=True, exist_ok=True)
+        (summaries_dir / category).mkdir(parents=True, exist_ok=True)
+    
+    return results_dir, images_dir, summaries_dir
+
+# Call this before creating the FastAPI app
+results_dir, images_dir, summaries_dir = create_directories()
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize components on startup."""
+    global news_handler, generator, image_generator, web_searcher
+    try:
+        # Validate environment variables
+        Config.validate()
+        
+        # Initialize handlers
+        news_handler = NewsAPIHandler()
+        generator = KidsNewsGenerator()
+        image_generator = KidFriendlyImageGenerator()
+        web_searcher = WebSearcher()  # Initialize web searcher
+        
+        # Load existing articles into RAG system
+        logger.info("Loading existing articles into RAG system...")
+        generator.rag.load_news_articles()
+        
+        # Mount static files
+        results_dir = Path(__file__).parent.parent / "results"
+        images_dir = results_dir / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        app.mount("/images", StaticFiles(directory=str(images_dir)), name="images")
+        
+        logger.info("Application startup completed successfully")
+    except Exception as e:
+        logger.error(f"Error during startup: {str(e)}")
+        raise
+
+# Keep only the valid categories list
+CATEGORIES = ["Science", "Technology", "Health", "Environment", "Economy"]
+
+class GenerateRequest(BaseModel):
+    topic: str
+    age_group: int
+    category: str
+    include_glossary: bool = True
+    generate_image: bool = True
+    original_news: Optional[Dict[str, Any]] = None
+
+class WebSearchRequest(BaseModel):
+    query: str
+
+# Initialize web searcher
+web_searcher = WebSearcher()
+
+@app.post("/generate")
+async def generate_article(request: GenerateRequest) -> Dict[str, Any]:
+    """Generate a kid-friendly article."""
+    try:
+        logger.info(f"Generating article for topic: {request.topic}, age group: {request.age_group}")
+        
+        # First, fetch a real news article
+        articles = await news_handler.fetch_articles(
+            category=request.category,
+            days=1,
+            max_articles=1
+        )
+        
+        if not articles:
+            logger.warning(f"No articles found for category: {request.category}")
+            # Use the topic directly if no articles found
+            topic = request.topic
+            original_article = {
+                "title": request.topic,
+                "content": "",
+                "source": "Custom Topic",
+                "url": "",
+                "published_at": datetime.now().isoformat()
+            }
+        else:
+            original_article = articles[0]
+            topic = original_article["title"]
+        
+        logger.info(f"Using topic for generation: {topic}")
+        
+        # Generate kid-friendly version
+        try:
+            result = generator.generate_news(
+                topic=topic,
+                age_group=request.age_group
+            )
+            logger.info("Successfully generated news content")
+        except Exception as e:
+            logger.error(f"Error in generate_news: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error generating content: {str(e)}")
+        
+        # Generate image if requested
+        image_url = None
+        if request.generate_image:
+            try:
+                image_result = image_generator.generate_image(
+                    content={
+                        "topic": topic,
+                        "text": result["text"],
+                        "category": request.category,
+                        "timestamp": result["timestamp"]
+                    },
+                    age_group=request.age_group
+                )
+                image_url = f"/images/{request.category}/{Path(image_result['image_path']).name}"
+            except Exception as e:
+                logger.error(f"Error generating image: {str(e)}")
+                # Continue without image if generation fails
+        
+        # Create a summary object
+        summary_data = {
+            "title": topic,
+            "category": request.category,
+            "content": result["text"],
+            "timestamp": result["timestamp"],
+            "age_group": request.age_group,
+            "safety_score": result.get("safety_score", 0.0),
+            "original_article": original_article
+        }
+        
+        # Save the summary
+        try:
+            generator.save_summary(result, summary_data)
+        except Exception as e:
+            logger.error(f"Error saving summary: {str(e)}")
+            # Continue even if saving fails
+        
+        # Prepare the response
+        response = {
+            "title": topic,
+            "content": result["text"],
+            "category": request.category,
+            "reading_level": f"Ages {request.age_group}-{request.age_group + 3}",
+            "safety_score": result.get("safety_score", 0.0),
+            "image_url": image_url,
+            "original_article": original_article
+        }
+        
+        logger.info(f"Successfully generated article with safety score: {response['safety_score']}")
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error generating article: {str(e)}")
+        logger.error(f"Error type: {type(e)}")
+        logger.error(f"Error details: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/")
+async def root():
+    """Root endpoint to verify server is running."""
+    return {"message": "Server is running", "categories": CATEGORIES}
+
+@app.get("/news/{category}")
+async def get_news(category: str) -> Dict[str, Any]:
+    """Get real news articles for a specific category."""
+    logger.info(f"Received request for category: {category}")
+    
+    try:
+        # Validate category
+        if category not in CATEGORIES:
+            return {"articles": []}  # Return empty list for invalid category
+        
+        # Fetch articles using NewsAPIHandler
+        articles = await news_handler.fetch_articles(
+            category=category,
+            days=1,
+            max_articles=5
+        )
+        
+        logger.info(f"Fetched {len(articles) if articles else 0} articles")
+        
+        # Process articles to match frontend expectations
+        processed_articles = []
+        for article in articles:
+            try:
+                processed_article = {
+                    "id": article.get("id", ""),
+                    "title": article.get("title", ""),
+                    "source": article.get("source", ""),
+                    "url": article.get("url", ""),
+                    "published_at": article.get("published_at", ""),
+                    "content": article.get("content", ""),
+                    "category": category,
+                    "description": article.get("description", ""),
+                    "image_url": article.get("urlToImage", None)
+                }
+                processed_articles.append(processed_article)
+            except Exception as e:
+                logger.error(f"Error processing article: {str(e)}")
+                continue
+        
+        return {"articles": processed_articles}
+        
+    except Exception as e:
+        logger.error(f"Error fetching news for category {category}: {str(e)}")
+        return {"articles": []}  # Return empty list instead of raising error
+
+@app.get("/news/{category}/full/{article_id}")
+async def get_full_article(category: str, article_id: str) -> Dict[str, Any]:
+    """Get full content of a specific article."""
+    try:
+        # Validate category
+        if category not in CATEGORIES:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid category. Must be one of: {', '.join(CATEGORIES)}"
+            )
+        
+        # Fetch articles
+        articles = await news_handler.fetch_articles(
+            category=category,
+            days=1,
+            max_articles=5
+        )
+        
+        # Find the specific article
+        article = next((a for a in articles if a.get("id") == article_id), None)
+        
+        if not article:
+            raise HTTPException(status_code=404, detail="Article not found")
+        
+        return {
+            "id": article_id,
+            "title": article.get("title", ""),
+            "source": article.get("source", ""),
+            "url": article.get("url", ""),
+            "published_at": article.get("published_at", ""),
+            "content": article.get("content", ""),
+            "category": category,
+            "description": article.get("description", ""),
+            "image_url": article.get("urlToImage", None)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching full article {article_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/categories")
+async def get_categories() -> List[str]:
+    """Get list of available categories."""
+    return CATEGORIES
+
+@app.get("/api/articles/history")
+async def get_article_history(category: str = "all") -> Dict[str, Any]:
+    """Get history of generated articles."""
+    try:
+        logger.info(f"Fetching article history for category: {category}")
+        
+        # Get the summaries directory
+        summaries_dir = Path(__file__).parent.parent / "results" / "summaries"
+        
+        # Initialize list to store articles
+        articles = []
+        
+        # If category is "all", search in all category directories
+        if category.lower() == "all":
+            categories = ["Science", "Technology", "Environment", "Health", "Economy"]
+        else:
+            categories = [category]
+        
+        # Search for summary files in each category directory
+        for cat in categories:
+            category_dir = summaries_dir / cat
+            if not category_dir.exists():
+                continue
+                
+            # Look for summary files
+            for summary_file in category_dir.glob("*.json"):
+                try:
+                    with open(summary_file, 'r', encoding='utf-8') as f:
+                        summary_data = json.load(f)
+                        
+                        # Get corresponding image if it exists
+                        image_path = None
+                        image_dir = Path(__file__).parent.parent / "results" / "images" / cat
+                        image_file = image_dir / f"{summary_file.stem}.png"
+                        if image_file.exists():
+                            image_path = f"/images/{cat}/{image_file.name}"
+                        
+                        # Create article object
+                        article = {
+                            "topic": summary_data.get("topic", ""),
+                            "text": summary_data.get("text", summary_data.get("prompt", "")),  # Try both text and prompt
+                            "timestamp": summary_data.get("timestamp", ""),
+                            "image_url": image_path,
+                            "age_group": f"{summary_data.get('age_group', 7)}-{summary_data.get('age_group', 7) + 3}",
+                            "combined_score": summary_data.get("safety_score", 0.0),
+                            "original_article": summary_data.get("original_article", {})
+                        }
+                        articles.append(article)
+                except Exception as e:
+                    logger.error(f"Error reading summary file {summary_file}: {str(e)}")
+                    continue
+        
+        # Sort articles by timestamp (newest first)
+        articles.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        
+        logger.info(f"Found {len(articles)} articles in history")
+        return {"articles": articles}
+        
+    except Exception as e:
+        logger.error(f"Error fetching article history: {str(e)}")
+        return {"articles": []}
+
+@app.post("/update-rag")
+async def update_rag_system():
+    """Update the RAG system with new articles."""
+    try:
+        logger.info("Updating RAG system with new articles...")
+        for category in CATEGORIES:
+            try:
+                articles = await news_handler.fetch_articles(
+                    category=category,
+                    days=1,
+                    max_articles=1
+                )
+                
+                if articles:
+                    logger.info(f"Fetched article for {category}: {articles[0]['title']}")
+                    # Prepare article for RAG
+                    rag_doc = news_handler.prepare_article_for_rag(articles[0])
+                    if rag_doc:
+                        logger.info(f"Prepared article for RAG: {articles[0]['title']}")
+                else:
+                    logger.warning(f"No articles found for category: {category}")
+            except Exception as e:
+                logger.error(f"Error fetching article for {category}: {str(e)}")
+        
+        # Reload articles into RAG system
+        generator.rag.load_news_articles()
+        
+        return {"message": "RAG system updated successfully"}
+        
+    except Exception as e:
+        logger.error(f"Error updating RAG system: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/search-articles")
+async def search_articles(request: WebSearchRequest) -> Dict[str, Any]:
+    """Search for articles using web search."""
+    try:
+        logger.info(f"Searching for articles with query: {request.query}")
+        articles = web_searcher.search_articles(request.query, max_results=5)
+        return {"articles": articles}
+    except Exception as e:
+        logger.error(f"Error searching articles: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/generate-from-url")
+async def generate_from_url(request: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate a kid-friendly article from a URL."""
+    try:
+        logger.info("Received generate-from-url request")
+        logger.info(f"Request data: {request}")
+        
+        url = request.get("url")
+        age_group = request.get("age_group")
+        
+        if not url:
+            logger.error("URL is missing from request")
+            raise HTTPException(status_code=400, detail="URL is required")
+        if not age_group:
+            logger.error("Age group is missing from request")
+            raise HTTPException(status_code=400, detail="Age group is required")
+        
+        logger.info(f"Processing URL: {url} for age group: {age_group}")
+        
+        # Extract article content
+        try:
+            content = web_searcher._extract_article_content(url)
+            if not content:
+                logger.error(f"Could not extract content from URL: {url}")
+                raise HTTPException(status_code=400, detail="Could not extract content from URL")
+            logger.info(f"Successfully extracted content, length: {len(content)}")
+        except Exception as e:
+            logger.error(f"Error extracting content: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error extracting content: {str(e)}")
+        
+        # Create a custom article object
+        custom_article = {
+            "title": request.get("title", "Custom Article"),
+            "content": content,
+            "source": request.get("source", "Web Search"),
+            "url": url,
+            "category": web_searcher._categorize_article(content),
+            "published_at": datetime.now().isoformat()
+        }
+        
+        logger.info(f"Created custom article with title: {custom_article['title']}")
+        
+        # Generate kid-friendly version
+        try:
+            logger.info("Generating kid-friendly version...")
+            result = generator.generate_news(
+                topic=custom_article["title"],
+                age_group=age_group
+            )
+            logger.info("Successfully generated kid-friendly version")
+        except Exception as e:
+            logger.error(f"Error generating kid-friendly version: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error generating content: {str(e)}")
+        
+        # Generate image if requested
+        image_url = None
+        if request.get("generate_image", True):
+            try:
+                logger.info("Generating image...")
+                image_result = image_generator.generate_image(
+                    content={
+                        "topic": custom_article["title"],
+                        "text": result["text"],
+                        "category": custom_article["category"],
+                        "timestamp": result["timestamp"]
+                    },
+                    age_group=age_group
+                )
+                image_url = f"/images/{custom_article['category']}/{Path(image_result['image_path']).name}"
+                logger.info(f"Successfully generated image: {image_url}")
+            except Exception as e:
+                logger.error(f"Error generating image: {str(e)}")
+                # Continue without image if generation fails
+        
+        # Create response
+        response = {
+            "title": custom_article["title"],
+            "content": result["text"],
+            "category": custom_article["category"],
+            "reading_level": f"Ages {age_group}-{age_group + 3}",
+            "safety_score": result.get("safety_score", 0.0),
+            "image_url": image_url,
+            "original_article": custom_article
+        }
+        
+        logger.info("Successfully prepared response")
+        return response
+        
+    except HTTPException as he:
+        logger.error(f"HTTP Exception in generate-from-url: {str(he)}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in generate-from-url: {str(e)}")
+        logger.error(f"Error type: {type(e)}")
+        logger.error(f"Error details: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        app,
+        host=Config.HOST,
+        port=Config.PORT
+    ) 

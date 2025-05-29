@@ -1,0 +1,35 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../final_project_machine_learning/cache"
+		},
+		{
+			"path": "../../final_project_machine_learning/images"
+		},
+		{
+			"path": "../../final_project_machine_learning/logs"
+		},
+		{
+			"path": "../../final_project_machine_learning/model_cache"
+		},
+		{
+			"path": "../../final_project_machine_learning/models"
+		},
+		{
+			"path": "../../final_project_machine_learning/offload"
+		},
+		{
+			"path": "../../final_project_machine_learning/results"
+		},
+		{
+			"path": "../../final_project_machine_learning/src"
+		},
+		{
+			"path": "../../final_project_machine_learning/test_results"
+		}
+	],
+	"settings": {}
+}
