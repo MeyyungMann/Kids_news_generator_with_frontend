@@ -20,7 +20,8 @@ class KidFriendlyImageGenerator:
     def __init__(
         self,
         model_id: str = "runwayml/stable-diffusion-v1-5",
-        device: Optional[str] = None
+        device: Optional[str] = None,
+        clip_handler: Optional[CLIPHandler] = None
     ):
         """
         Initialize the image generator.
@@ -28,6 +29,7 @@ class KidFriendlyImageGenerator:
         Args:
             model_id: Stable Diffusion model ID
             device: Device to run the model on
+            clip_handler: Optional CLIPHandler instance. If not provided, a new one will be created.
         """
         self.model_id = model_id
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -53,8 +55,8 @@ class KidFriendlyImageGenerator:
         # Initialize the pipeline
         self._init_pipeline()
         
-        # Initialize CLIP handler
-        self.clip_handler = CLIPHandler()
+        # Use provided CLIP handler or create a new one
+        self.clip_handler = clip_handler or CLIPHandler()
     
     def _init_pipeline(self):
         """Initialize the Stable Diffusion pipeline."""

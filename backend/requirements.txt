@@ -1,8 +1,9 @@
 # Core ML and Transformers
 transformers>=4.36.0
-torch>=2.1.0
-torchvision>=0.15.0
-torchaudio>=2.0.0
+--find-links https://download.pytorch.org/whl/nightly/cu128
+torch>=2.2.0.dev0
+torchvision>=0.17.0.dev0
+torchaudio>=2.2.0.dev0
 accelerate>=0.25.0
 bitsandbytes>=0.41.1
 safetensors>=0.4.0

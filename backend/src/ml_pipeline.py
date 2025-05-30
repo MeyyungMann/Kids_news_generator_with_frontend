@@ -175,29 +175,48 @@ class KidsNewsGenerator:
             # Create prompt based on age group
             try:
                 if 3 <= age_group <= 6:  # Preschool
-                    prompt = f"""Create a very simple, kid-friendly explanation about {topic} for preschoolers (ages 3-6).
-                    Use these verified facts:
+                    prompt = f"""
+                    Write a complete, short story that explains "{topic}" in a simple, fun, and kid-friendly way for preschoolers (ages 3–6).
+                    
+                    Use only the following facts:
                     {context}
                     
-                    Use very simple words and short sentences.
-                    Include fun facts and make it engaging.
-                    Format the response as a story.
-                    
-                    Start your story with: "Once upon a time" or "Let me tell you a story about" or "Here's a fun story about"."""
+                    - Use very simple vocabulary and short sentences.
+                    - Keep the tone light, playful, and imaginative.
+                    - Add a fun fact or character to keep it engaging.
+                    - Make sure the story has a clear beginning, middle, and end.
+                    - If you’re running out of space, always finish the story with a gentle conclusion.
+
+                    End with a friendly sentence like: "Wasn’t that fun?" or "The end!"
+                    """
+
                 elif 7 <= age_group <= 9:  # Early Elementary
-                    prompt = f"""Create a kid-friendly explanation about {topic} for early elementary students (ages 7-9).
-                    Use simple words and clear explanations.
-                    Include interesting facts and make it engaging.
-                    Format the response as a story.
+                    prompt = f"""
+                    Write a complete story that explains "{topic}" to kids aged 7–9 using the following facts:
+                    {context}
                     
-                    Start your story with: "Once upon a time" or "Let me tell you a story about" or "Here's a fun story about"."""
+                    - Use clear, simple language suitable for young readers.
+                    - Include engaging details and maybe a fun character or setting.
+                    - Make the story informative and entertaining.
+                    - Ensure the story has a beginning, middle, and a complete ending.
+                    - If you are close to the maximum length, prioritize wrapping up the story naturally.
+                    
+                    End with a sentence that feels like the end of a short adventure or lesson.
+                    """
+
                 else:  # Upper Elementary
-                    prompt = f"""Create a kid-friendly explanation about {topic} for upper elementary students (ages 10-12).
-                    Use age-appropriate vocabulary and detailed explanations.
-                    Include interesting facts and make it engaging.
-                    Format the response as a story.
+                    prompt = f"""
+                    Write a complete, kid-friendly story that explains "{topic}" for students aged 10–12, using the following facts:
+                    {context}
                     
-                    Start your story with: "Once upon a time" or "Let me tell you a story about" or "Here's a fun story about"."""
+                    - Use age-appropriate vocabulary and detailed but clear explanations.
+                    - Include fun or surprising facts to keep them interested.
+                    - Add a glossary of 3–5 key terms at the end, with simple definitions.
+                    - The story should be structured (beginning, middle, end) and feel satisfying when finished.
+                    - If approaching the max token limit, make sure the story ends with a proper conclusion rather than stopping abruptly.
+
+                    Always finish with a closing line like: "Hope you enjoyed learning about {topic}!"
+                    """
                 
                 logger.info("Created prompt for model")
             except Exception as e:

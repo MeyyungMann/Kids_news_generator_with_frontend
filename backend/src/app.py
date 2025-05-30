@@ -31,7 +31,7 @@ app = FastAPI(title="Kids News Generator API")
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -74,13 +74,9 @@ async def startup_event():
         # Initialize handlers
         news_handler = NewsAPIHandler()
         generator = KidsNewsGenerator()
-        image_generator = KidFriendlyImageGenerator()
+        clip_handler = CLIPHandler()  # Initialize CLIP handler first
+        image_generator = KidFriendlyImageGenerator(clip_handler=clip_handler)  # Pass the CLIP handler
         web_searcher = WebSearcher()
-        clip_handler = CLIPHandler()  # Initialize CLIP handler
-        
-        # Load existing articles into RAG system
-        logger.info("Loading existing articles into RAG system...")
-        generator.rag.load_news_articles()
         
         # Mount static files
         results_dir = Path(__file__).parent.parent / "results"
@@ -110,11 +106,15 @@ class WebSearchRequest(BaseModel):
 # Initialize web searcher
 web_searcher = WebSearcher()
 
-@app.post("/generate")
+@app.post("/api/generate")
 async def generate_article(request: GenerateRequest) -> Dict[str, Any]:
     """Generate a kid-friendly article."""
     try:
-        logger.info(f"Generating article for topic: {request.topic}, age group: {request.age_group}")
+        logger.info(f"Generating article for topic: {request.topic}, age_group: {request.age_group}")
+        
+        # Load articles into RAG system before generation
+        logger.info("Loading articles into RAG system...")
+        generator.rag.load_news_articles()
         
         # First, fetch a real news article
         articles = await news_handler.fetch_articles(
@@ -215,7 +215,7 @@ async def root():
     """Root endpoint to verify server is running."""
     return {"message": "Server is running", "categories": CATEGORIES}
 
-@app.get("/news/{category}")
+@app.get("/api/news/{category}")
 async def get_news(category: str) -> Dict[str, Any]:
     """Get real news articles for a specific category."""
     logger.info(f"Received request for category: {category}")
@@ -260,7 +260,7 @@ async def get_news(category: str) -> Dict[str, Any]:
         logger.error(f"Error fetching news for category {category}: {str(e)}")
         return {"articles": []}  # Return empty list instead of raising error
 
-@app.get("/news/{category}/full/{article_id}")
+@app.get("/api/news/{category}/full/{article_id}")
 async def get_full_article(category: str, article_id: str) -> Dict[str, Any]:
     """Get full content of a specific article."""
     try:
@@ -367,7 +367,7 @@ async def get_article_history(category: str = "all") -> Dict[str, Any]:
         logger.error(f"Error fetching article history: {str(e)}")
         return {"articles": []}
 
-@app.post("/update-rag")
+@app.post("/api/update-rag")
 async def update_rag_system():
     """Update the RAG system with new articles."""
     try:
@@ -400,7 +400,7 @@ async def update_rag_system():
         logger.error(f"Error updating RAG system: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/search-articles")
+@app.post("/api/search-articles")
 async def search_articles(request: WebSearchRequest) -> Dict[str, Any]:
     """Search for articles using web search."""
     try:
@@ -411,7 +411,7 @@ async def search_articles(request: WebSearchRequest) -> Dict[str, Any]:
         logger.error(f"Error searching articles: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/generate-from-url")
+@app.post("/api/generate-from-url")
 async def generate_from_url(request: Dict[str, Any]) -> Dict[str, Any]:
     """Generate a kid-friendly article from a URL."""
     try:
@@ -429,6 +429,10 @@ async def generate_from_url(request: Dict[str, Any]) -> Dict[str, Any]:
             raise HTTPException(status_code=400, detail="Age group is required")
         
         logger.info(f"Processing URL: {url} for age group: {age_group}")
+        
+        # Load articles into RAG system before generation
+        logger.info("Loading articles into RAG system...")
+        generator.rag.load_news_articles()
         
         # Extract article content
         try:
@@ -511,7 +515,7 @@ async def generate_from_url(request: Dict[str, Any]) -> Dict[str, Any]:
         logger.error(f"Error details: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/compute-similarity")
+@app.post("/api/compute-similarity")
 async def compute_similarity(request: Dict[str, Any]) -> Dict[str, Any]:
     """Compute similarity between an image and text."""
     try:

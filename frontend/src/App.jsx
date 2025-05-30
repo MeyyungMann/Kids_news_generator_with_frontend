@@ -45,14 +45,14 @@ function App() {
     setRealNews(null);
 
     try {
-      const response = await axios.get(`http://localhost:8000/news/${selectedCategory}`);
+      const response = await axios.get(`/api/news/${selectedCategory}`);
       if (response.data.articles && response.data.articles.length > 0) {
         const article = response.data.articles[0];
         
         // Only try to get full content if we have a valid article ID
         if (article.id) {
           try {
-            const fullContentResponse = await axios.get(`http://localhost:8000/news/${selectedCategory}/full/${article.id}`);
+            const fullContentResponse = await axios.get(`/api/news/${selectedCategory}/full/${article.id}`);
             if (fullContentResponse.data && fullContentResponse.data.content) {
               article.content = fullContentResponse.data.content;
             }
@@ -102,7 +102,7 @@ function App() {
       }
 
       // Generate kid-friendly content
-      const response = await axios.post('http://localhost:8000/generate', requestPayload);
+      const response = await axios.post('/api/generate', requestPayload);
       setArticle(response.data);
     } catch (err) {
       setError('Failed to generate article. Please try again.');
@@ -126,7 +126,7 @@ function App() {
         return;
       }
       
-      const response = await axios.post('http://localhost:8000/generate-from-url', {
+      const response = await axios.post('/api/generate-from-url', {
         url: articleUrl,  // Use the properly formatted URL
         title: article.title,
         source: article.source,
@@ -316,7 +316,7 @@ function App() {
                                 {article.image_url && (
                                   <div className="relative">
                                     <img
-                                      src={`http://localhost:8000${article.image_url}`}
+                                      src={article.image_url}
                                       alt={article.title}
                                       className="w-full max-h-[500px] object-contain rounded-lg mb-6 shadow-md"
                                     />

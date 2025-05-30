@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import ImageFilter from './ImageFilter';
 
 const ArticleHistory = () => {
     const [articles, setArticles] = useState([]);
@@ -8,8 +7,6 @@ const ArticleHistory = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [showPrompts, setShowPrompts] = useState({});  // Track which articles show prompts
-    const [clipScore, setClipScore] = useState(50); // Default minimum CLIP score
-    const [sortOrder, setSortOrder] = useState('relevance');
 
     const categories = [
         { id: 'all', name: 'All Categories' },
@@ -28,7 +25,7 @@ const ArticleHistory = () => {
         try {
             setLoading(true);
             setError(null);
-            const response = await axios.get(`http://localhost:8000/api/articles/history?category=${selectedCategory}`);
+            const response = await axios.get(`/api/articles/history?category=${selectedCategory}`);
             const articlesData = response.data.articles || [];
             setArticles(articlesData);
             
@@ -77,27 +74,6 @@ const ArticleHistory = () => {
             .trim();
     };
 
-    // Add filtering and sorting logic
-    const filterAndSortArticles = (articles) => {
-        return articles
-            .filter(article => {
-                const score = article.clip_similarity_score || 0;
-                return score >= clipScore;
-            })
-            .sort((a, b) => {
-                switch (sortOrder) {
-                    case 'relevance':
-                        return (b.clip_similarity_score || 0) - (a.clip_similarity_score || 0);
-                    case 'newest':
-                        return new Date(b.timestamp) - new Date(a.timestamp);
-                    case 'oldest':
-                        return new Date(a.timestamp) - new Date(b.timestamp);
-                    default:
-                        return 0;
-                }
-            });
-    };
-
     return (
         <div className="max-w-4xl mx-auto p-4">
             <div className="mb-6">
@@ -119,13 +95,6 @@ const ArticleHistory = () => {
                 </div>
             </div>
 
-            <ImageFilter
-                clipScore={clipScore}
-                onFilterChange={setClipScore}
-                sortOrder={sortOrder}
-                onSortChange={setSortOrder}
-            />
-
             {loading && (
                 <div className="text-center py-4">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
@@ -139,7 +108,7 @@ const ArticleHistory = () => {
             )}
 
             <div className="space-y-6">
-                {filterAndSortArticles(articles).map((article, index) => (
+                {articles.map((article, index) => (
                     <div key={index} className="bg-white rounded-lg shadow-md p-6">
                         <div className="flex justify-between items-start mb-4">
                             <h3 className="text-xl font-semibold text-gray-800">{article.topic}</h3>
@@ -179,17 +148,10 @@ const ArticleHistory = () => {
                         {article.image_url && (
                             <div className="relative">
                                 <img
-                                    src={`http://localhost:8000${article.image_url}`}
+                                    src={article.image_url}
                                     alt={article.topic}
                                     className="w-full h-96 object-contain rounded-lg mb-4 shadow-lg hover:scale-105 transition-transform duration-300"
                                 />
-                                {article.clip_similarity_score && (
-                                    <div className="absolute top-2 right-2 bg-white bg-opacity-90 px-3 py-1 rounded-full shadow-md">
-                                        <span className="text-sm font-medium text-gray-700">
-                                            CLIP Score: {article.clip_similarity_score.toFixed(1)}%
-                                        </span>
-                                    </div>
-                                )}
                             </div>
                         )}
                         
