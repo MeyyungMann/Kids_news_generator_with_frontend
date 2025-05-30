@@ -16,6 +16,7 @@ from image_generator import KidFriendlyImageGenerator  # Import the KidFriendlyI
 from config import Config  # Import the config
 from fastapi.staticfiles import StaticFiles
 from web_search import WebSearcher
+from clip_handler import CLIPHandler
 
 # Configure logging
 logging.basicConfig(
@@ -41,6 +42,7 @@ news_handler = None
 generator = None
 image_generator = None
 web_searcher = None
+clip_handler = None
 
 # Add this function to create necessary directories
 def create_directories():
@@ -64,7 +66,7 @@ results_dir, images_dir, summaries_dir = create_directories()
 @app.on_event("startup")
 async def startup_event():
     """Initialize components on startup."""
-    global news_handler, generator, image_generator, web_searcher
+    global news_handler, generator, image_generator, web_searcher, clip_handler
     try:
         # Validate environment variables
         Config.validate()
@@ -73,7 +75,8 @@ async def startup_event():
         news_handler = NewsAPIHandler()
         generator = KidsNewsGenerator()
         image_generator = KidFriendlyImageGenerator()
-        web_searcher = WebSearcher()  # Initialize web searcher
+        web_searcher = WebSearcher()
+        clip_handler = CLIPHandler()  # Initialize CLIP handler
         
         # Load existing articles into RAG system
         logger.info("Loading existing articles into RAG system...")
@@ -150,6 +153,7 @@ async def generate_article(request: GenerateRequest) -> Dict[str, Any]:
         
         # Generate image if requested
         image_url = None
+        clip_similarity_score = None
         if request.generate_image:
             try:
                 image_result = image_generator.generate_image(
@@ -162,6 +166,7 @@ async def generate_article(request: GenerateRequest) -> Dict[str, Any]:
                     age_group=request.age_group
                 )
                 image_url = f"/images/{request.category}/{Path(image_result['image_path']).name}"
+                clip_similarity_score = image_result['metadata'].get('clip_similarity_score')
             except Exception as e:
                 logger.error(f"Error generating image: {str(e)}")
                 # Continue without image if generation fails
@@ -192,6 +197,7 @@ async def generate_article(request: GenerateRequest) -> Dict[str, Any]:
             "reading_level": f"Ages {request.age_group}-{request.age_group + 3}",
             "safety_score": result.get("safety_score", 0.0),
             "image_url": image_url,
+            "clip_similarity_score": clip_similarity_score,
             "original_article": original_article
         }
         
@@ -461,6 +467,7 @@ async def generate_from_url(request: Dict[str, Any]) -> Dict[str, Any]:
         
         # Generate image if requested
         image_url = None
+        clip_similarity_score = None
         if request.get("generate_image", True):
             try:
                 logger.info("Generating image...")
@@ -474,6 +481,7 @@ async def generate_from_url(request: Dict[str, Any]) -> Dict[str, Any]:
                     age_group=age_group
                 )
                 image_url = f"/images/{custom_article['category']}/{Path(image_result['image_path']).name}"
+                clip_similarity_score = image_result['metadata'].get('clip_similarity_score')
                 logger.info(f"Successfully generated image: {image_url}")
             except Exception as e:
                 logger.error(f"Error generating image: {str(e)}")
@@ -487,6 +495,7 @@ async def generate_from_url(request: Dict[str, Any]) -> Dict[str, Any]:
             "reading_level": f"Ages {age_group}-{age_group + 3}",
             "safety_score": result.get("safety_score", 0.0),
             "image_url": image_url,
+            "clip_similarity_score": clip_similarity_score,
             "original_article": custom_article
         }
         
@@ -500,6 +509,28 @@ async def generate_from_url(request: Dict[str, Any]) -> Dict[str, Any]:
         logger.error(f"Unexpected error in generate-from-url: {str(e)}")
         logger.error(f"Error type: {type(e)}")
         logger.error(f"Error details: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/compute-similarity")
+async def compute_similarity(request: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute similarity between an image and text."""
+    try:
+        image_path = request.get("image_path")
+        text = request.get("text")
+        
+        if not image_path or not text:
+            raise HTTPException(status_code=400, detail="Both image_path and text are required")
+        
+        similarity = clip_handler.compute_similarity(image_path, text)
+        
+        return {
+            "similarity": similarity,
+            "image_path": image_path,
+            "text": text
+        }
+        
+    except Exception as e:
+        logger.error(f"Error computing similarity: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

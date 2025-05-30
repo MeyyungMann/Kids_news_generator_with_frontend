@@ -7,6 +7,7 @@ import json
 from PIL import Image
 import os
 import gc
+from clip_handler import CLIPHandler
 
 # Configure logging
 logging.basicConfig(
@@ -51,6 +52,9 @@ class KidFriendlyImageGenerator:
         
         # Initialize the pipeline
         self._init_pipeline()
+        
+        # Initialize CLIP handler
+        self.clip_handler = CLIPHandler()
     
     def _init_pipeline(self):
         """Initialize the Stable Diffusion pipeline."""
@@ -90,6 +94,93 @@ class KidFriendlyImageGenerator:
             logger.error(f"Error loading Stable Diffusion model: {str(e)}")
             raise
     
+    def _create_clip_prompt(self, content: Dict[str, Any], age_group: int) -> str:
+        """Create a concise prompt for CLIP validation."""
+        topic = content.get("topic", "")
+        category = content.get("category", "").lower()
+        
+        # Create a simplified prompt for CLIP
+        prompt = f"kid-friendly illustration about {topic}"
+        
+        # Add category-specific elements
+        category_elements = {
+            "science": "scientific illustration",
+            "technology": "technology illustration",
+            "health": "health education illustration",
+            "environment": "nature illustration",
+            "economy": "economic education illustration"
+        }
+        
+        category_element = category_elements.get(category, "")
+        if category_element:
+            prompt += f", {category_element}"
+        
+        return prompt
+    
+    def _validate_image(self, image: Image.Image, content: Dict[str, Any], age_group: int, min_similarity: float = 0.5) -> bool:
+        """Validate generated image using CLIP."""
+        try:
+            # Save image temporarily
+            temp_path = self.base_dir / "temp_validation.png"
+            image.save(temp_path)
+            
+            # Create a concise prompt for CLIP
+            clip_prompt = self._create_clip_prompt(content, age_group)
+            
+            # Compute similarity
+            similarity = self.clip_handler.compute_similarity(str(temp_path), clip_prompt)
+            
+            # Clean up
+            temp_path.unlink()
+            
+            return similarity >= min_similarity
+        except Exception as e:
+            logger.error(f"Error validating image with CLIP: {str(e)}")
+            return True  # Return True on error to not block generation
+    
+    def _create_style_guidance(self, age_group: int) -> str:
+        """Create age-appropriate style guidance for image generation."""
+        styles = {
+            # Ages 3-6 (Preschool)
+            "3-6": {
+                "style": "very simple cartoon style",
+                "colors": "bright, primary colors",
+                "shapes": "simple, basic shapes",
+                "characters": "friendly, cute characters",
+                "details": "minimal details, clear outlines",
+                "mood": "happy, cheerful, playful"
+            },
+            
+            # Ages 7-9 (Early Elementary)
+            "7-9": {
+                "style": "colorful cartoon style",
+                "colors": "vibrant, engaging colors",
+                "shapes": "clear, recognizable shapes",
+                "characters": "expressive, relatable characters",
+                "details": "moderate details, educational elements",
+                "mood": "engaging, educational, fun"
+            },
+            
+            # Ages 10-12 (Upper Elementary)
+            "10-12": {
+                "style": "detailed illustration style",
+                "colors": "rich, varied colors",
+                "shapes": "complex, realistic shapes",
+                "characters": "realistic, detailed characters",
+                "details": "more detailed, informative elements",
+                "mood": "educational, informative, engaging"
+            }
+        }
+        
+        # Get style for age group or default to 7-9
+        age_key = str(age_group)
+        style = styles.get(age_key, styles["7-9"])
+        
+        # Combine style elements into a prompt
+        style_prompt = f"{style['style']}, {style['colors']}, {style['shapes']}, {style['characters']}, {style['details']}, {style['mood']}"
+        
+        return style_prompt
+    
     def _create_prompt(self, content: Dict[str, Any], age_group: int) -> str:
         """
         Create a kid-friendly prompt for image generation.
@@ -101,42 +192,14 @@ class KidFriendlyImageGenerator:
         Returns:
             Formatted prompt for image generation
         """
-        # Extract key elements from content
-        topic = content.get("topic", "")
-        text = content.get("text", "")
-        category = content.get("category", "").lower()
+        # Get style guidance
+        style_guidance = self._create_style_guidance(age_group)
         
-        # Create age-appropriate style using consistent ranges
-        if 3 <= age_group <= 6:  # Preschool (3-6)
-            style = "cute cartoon style, bright colors, simple shapes, friendly characters, very simple and clear, perfect for preschoolers, no text, no letters, no words"
-            complexity = "very simple, basic concepts, friendly and approachable, visual only"
-        elif 7 <= age_group <= 9:  # Early Elementary (7-9)
-            style = "colorful cartoon style, fun characters, educational illustration, engaging and playful, perfect for early readers, no text, no letters, no words"
-            complexity = "clear and engaging, educational but fun, easy to understand, visual only"
-        elif 10 <= age_group <= 12:  # Upper Elementary (10-12)
-            style = "engaging illustration style, educational, clear and colorful, slightly more detailed, perfect for older elementary students, no text, no letters, no words"
-            complexity = "more detailed but still kid-friendly, educational and informative, visual only"
-        else:
-            # Default to middle range if age group is invalid
-            style = "colorful cartoon style, fun characters, educational illustration, engaging and playful, perfect for early readers, no text, no letters, no words"
-            complexity = "clear and engaging, educational but fun, easy to understand, visual only"
+        # Create the prompt with style guidance
+        prompt = f"Create a kid-friendly illustration about {content.get('topic', '')}. {content.get('text', '')[:100]}... {style_guidance}"
         
-        # Add category-specific elements
-        category_elements = {
-            "science": "scientific concepts, experiments, nature, space, animals, visual representation only",
-            "technology": "computers, robots, gadgets, innovation, digital world, visual representation only",
-            "health": "healthy habits, body, nutrition, exercise, wellness, visual representation only",
-            "environment": "nature, animals, plants, conservation, weather, visual representation only",
-            "economy": "money, saving, shopping, business, community, visual representation only"
-        }
-        
-        category_element = category_elements.get(category, "")
-        
-        # Create the prompt
-        prompt = f"Create a kid-friendly illustration about {topic}. {text[:100]}... Style: {style}, {complexity}, {category_element}, kid-friendly, educational, safe for children, visual only, no text, no letters, no words, no writing"
-        
-        # Add negative prompt to ensure kid-friendly content and no text
-        negative_prompt = "text, letters, words, writing, numbers, symbols, signs, labels, captions, scary, violent, inappropriate, complex, realistic, photorealistic, dark, scary, frightening, text, words, letters, writing, numbers, symbols, signs, labels, captions"
+        # Add negative prompt
+        negative_prompt = "text, letters, words, writing, numbers, symbols, signs, labels, captions, scary, violent, inappropriate"
         
         return prompt, negative_prompt
     
@@ -145,7 +208,8 @@ class KidFriendlyImageGenerator:
         content: Dict[str, Any],
         age_group: int,
         num_inference_steps: int = 30,
-        guidance_scale: float = 7.5
+        guidance_scale: float = 7.5,
+        max_attempts: int = 3
     ) -> Dict[str, Any]:
         """
         Generate a kid-friendly image based on the content.
@@ -155,6 +219,7 @@ class KidFriendlyImageGenerator:
             age_group: Target age group
             num_inference_steps: Number of denoising steps
             guidance_scale: How closely to follow the prompt
+            max_attempts: Number of attempts to generate a valid image
             
         Returns:
             Dictionary containing image path and metadata
@@ -163,14 +228,26 @@ class KidFriendlyImageGenerator:
             # Create prompt
             prompt, negative_prompt = self._create_prompt(content, age_group)
             
-            # Generate image
-            logger.info("Generating image...")
-            image = self.pipeline(
-                prompt=prompt,
-                negative_prompt=negative_prompt,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale
-            ).images[0]
+            # Generate image with validation
+            for attempt in range(max_attempts):
+                logger.info(f"Generating image (attempt {attempt + 1}/{max_attempts})...")
+                
+                # Generate image
+                image = self.pipeline(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale
+                ).images[0]
+                
+                # Validate with CLIP
+                if self._validate_image(image, content, age_group):
+                    logger.info("Image validated successfully with CLIP")
+                    break
+                else:
+                    logger.warning(f"Image validation failed (attempt {attempt + 1})")
+                    if attempt == max_attempts - 1:
+                        logger.warning("Using last generated image despite validation failure")
             
             # Save image
             timestamp = content.get("timestamp", "")
@@ -183,6 +260,9 @@ class KidFriendlyImageGenerator:
             image_path = self.images_dir / category / f"{safe_title}_{timestamp}.png"
             image.save(image_path)
             
+            # Compute CLIP similarity score
+            similarity_score = self.clip_handler.compute_similarity(str(image_path), self._create_clip_prompt(content, age_group))
+            
             # Save metadata
             metadata = {
                 "prompt": prompt,
@@ -190,7 +270,8 @@ class KidFriendlyImageGenerator:
                 "age_group": age_group,
                 "topic": content.get("topic", ""),
                 "timestamp": timestamp,
-                "image_path": str(image_path)
+                "image_path": str(image_path),
+                "clip_similarity_score": similarity_score
             }
             
             # Save metadata in category-specific directory

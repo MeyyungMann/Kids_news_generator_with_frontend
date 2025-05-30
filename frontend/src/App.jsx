@@ -314,11 +314,20 @@ function App() {
                             <div className="border-t border-gray-200">
                               <div className="px-4 py-5 sm:p-6 prose max-w-none">
                                 {article.image_url && (
-                                  <img
-                                    src={`http://localhost:8000${article.image_url}`}
-                                    alt={article.title}
-                                    className="w-full max-h-[500px] object-contain rounded-lg mb-6 shadow-md"
-                                  />
+                                  <div className="relative">
+                                    <img
+                                      src={`http://localhost:8000${article.image_url}`}
+                                      alt={article.title}
+                                      className="w-full max-h-[500px] object-contain rounded-lg mb-6 shadow-md"
+                                    />
+                                    {article.clip_similarity_score && (
+                                      <div className="absolute top-2 right-2 bg-white bg-opacity-90 px-3 py-1 rounded-full shadow-md">
+                                        <span className="text-sm font-medium text-gray-700">
+                                          Image Relevance: {article.clip_similarity_score.toFixed(1)}%
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
                                 )}
                                 <div className="whitespace-pre-wrap">{article.content}</div>
                                 
