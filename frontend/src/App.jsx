@@ -130,7 +130,7 @@ function App() {
         url: articleUrl,  // Use the properly formatted URL
         title: article.title,
         source: article.source,
-        age_group: getAgeGroupNumber(selectedAgeGroup),
+        age_group: getAgeGroupNumber(article.ageGroup),  // Use age group from WebSearch
         generate_image: true
       });
       

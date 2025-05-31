@@ -455,26 +455,22 @@ async def generate_from_url(request: Dict[str, Any]) -> Dict[str, Any]:
             "published_at": datetime.now().isoformat()
         }
         
-        logger.info(f"Created custom article with title: {custom_article['title']}")
-        
-        # Generate kid-friendly version
+        # Generate kid-friendly content
         try:
-            logger.info("Generating kid-friendly version...")
             result = generator.generate_news(
                 topic=custom_article["title"],
                 age_group=age_group
             )
-            logger.info("Successfully generated kid-friendly version")
+            logger.info("Successfully generated kid-friendly content")
         except Exception as e:
-            logger.error(f"Error generating kid-friendly version: {str(e)}")
+            logger.error(f"Error generating content: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Error generating content: {str(e)}")
         
         # Generate image if requested
         image_url = None
         clip_similarity_score = None
-        if request.get("generate_image", True):
+        if request.get("generate_image", False):
             try:
-                logger.info("Generating image...")
                 image_result = image_generator.generate_image(
                     content={
                         "topic": custom_article["title"],
@@ -486,10 +482,26 @@ async def generate_from_url(request: Dict[str, Any]) -> Dict[str, Any]:
                 )
                 image_url = f"/images/{custom_article['category']}/{Path(image_result['image_path']).name}"
                 clip_similarity_score = image_result['metadata'].get('clip_similarity_score')
-                logger.info(f"Successfully generated image: {image_url}")
             except Exception as e:
                 logger.error(f"Error generating image: {str(e)}")
                 # Continue without image if generation fails
+        
+        # Save the summary
+        try:
+            summary_data = {
+                "title": custom_article["title"],
+                "category": custom_article["category"],
+                "content": result["text"],
+                "timestamp": result["timestamp"],
+                "age_group": age_group,
+                "safety_score": result.get("safety_score", 0.0),
+                "original_article": custom_article
+            }
+            generator.save_summary(result, summary_data)
+            logger.info("Successfully saved summary")
+        except Exception as e:
+            logger.error(f"Error saving summary: {str(e)}")
+            # Continue even if saving fails
         
         # Create response
         response = {

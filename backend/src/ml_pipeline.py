@@ -4,6 +4,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 import json
 import torch
+import re
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from image_generator import KidFriendlyImageGenerator
 from config import Config
@@ -175,49 +176,54 @@ class KidsNewsGenerator:
             # Create prompt based on age group
             try:
                 if 3 <= age_group <= 6:  # Preschool
-                    prompt = f"""
-                    Write a complete, short story that explains "{topic}" in a simple, fun, and kid-friendly way for preschoolers (ages 3–6).
-                    
-                    Use only the following facts:
+                    prompt = f"""You are a children's storyteller. Write a story about "{topic}" using these facts:
                     {context}
                     
-                    - Use very simple vocabulary and short sentences.
-                    - Keep the tone light, playful, and imaginative.
-                    - Add a fun fact or character to keep it engaging.
-                    - Make sure the story has a clear beginning, middle, and end.
-                    - If you’re running out of space, always finish the story with a gentle conclusion.
-
-                    End with a friendly sentence like: "Wasn’t that fun?" or "The end!"
+                    The story must:
+                    1. Start with "Once upon a time" and introduce a friendly character
+                    2. Explain the topic in simple terms
+                    3. End with a happy conclusion
+                    
+                    Use very simple words and write exactly 3 paragraphs. End with "Wasn't that fun?" or "The end!"
+                    Do not add any extra text after the story ends.
                     """
 
                 elif 7 <= age_group <= 9:  # Early Elementary
-                    prompt = f"""
-                    Write a complete story that explains "{topic}" to kids aged 7–9 using the following facts:
+                    prompt = f"""You are a children's storyteller. Write a story about "{topic}" using these facts:
                     {context}
                     
-                    - Use clear, simple language suitable for young readers.
-                    - Include engaging details and maybe a fun character or setting.
-                    - Make the story informative and entertaining.
-                    - Ensure the story has a beginning, middle, and a complete ending.
-                    - If you are close to the maximum length, prioritize wrapping up the story naturally.
+                    The story must:
+                    1. Start with an engaging opening and introduce the setting
+                    2. Present the topic through a simple adventure
+                    3. Show how the character learns about the topic
+                    4. End with a satisfying conclusion
                     
-                    End with a sentence that feels like the end of a short adventure or lesson.
+                    Use clear, simple language and write exactly 4 paragraphs. Make sure to tie everything together at the end.
+                    Do not add any extra text after the story ends.
                     """
 
                 else:  # Upper Elementary
-                    prompt = f"""
-                    Write a complete, kid-friendly story that explains "{topic}" for students aged 10–12, using the following facts:
+                    prompt = f"""You are a children's storyteller. Write a story about "{topic}" using these facts:
                     {context}
                     
-                    - Use age-appropriate vocabulary and detailed but clear explanations.
-                    - Include fun or surprising facts to keep them interested.
-                    - Add a glossary of 3–5 key terms at the end, with simple definitions.
-                    - The story should be structured (beginning, middle, end) and feel satisfying when finished.
-                    - If approaching the max token limit, make sure the story ends with a proper conclusion rather than stopping abruptly.
-
-                    Always finish with a closing line like: "Hope you enjoyed learning about {topic}!"
+                    The story must:
+                    1. Start with an interesting opening
+                    2. Set up the main character and their challenge
+                    3. Present the topic through an engaging narrative
+                    4. Include key facts and explanations
+                    5. End with a satisfying conclusion
+                    
+                    Use age-appropriate vocabulary and write exactly 5 paragraphs.
+                    
+                    After the story, add a "Glossary" section with exactly 3 key terms from the story, formatted like this:
+                    Glossary:
+                    - Term 1: Simple definition
+                    - Term 2: Simple definition
+                    - Term 3: Simple definition
+                    
+                    Do not add any extra text after the glossary.
                     """
-                
+
                 logger.info("Created prompt for model")
             except Exception as e:
                 logger.error(f"Error creating prompt: {str(e)}")
@@ -237,7 +243,7 @@ class KidsNewsGenerator:
             try:
                 outputs = self.model.generate(
                     **inputs,
-                    max_length=512,
+                    max_length=8192,
                     num_return_sequences=1,
                     temperature=0.7,
                     do_sample=True
@@ -324,28 +330,75 @@ class KidsNewsGenerator:
         
         # List of phrases that indicate prompt content to remove
         prompt_phrases = [
-            'guidelines:',
-            'now, create',
-            'example:',
+            # Role and context
             'you are',
-            'style:',
-            'negative_prompt:',
-            'format the response',
-            'use these verified facts:',
-            'use simple words',
+            'children\'s storyteller',
+            'storyteller',
+            
+            # Story instructions
+            'write a story',
+            'write a complete story',
+            'write exactly',
+            'the story must',
+            'the story must:',
+            'story must:',
+            
+            # Content markers
+            'using these facts',
+            'using these facts:',
+            'use these facts',
+            'use these facts:',
+            'facts to include',
+            
+            # Language requirements
             'use very simple words',
+            'use clear, simple language',
             'use age-appropriate vocabulary',
-            'include fun facts',
-            'include interesting facts',
-            'make it engaging',
-            'format the response as a story',
-            'create a very simple',
-            'kid-friendly explanation',
-            'for preschoolers',
-            'ages 3-6',
-            'ages 7-9',
-            'ages 10-12',
-            'skip to main content'
+            'use simple vocabulary',
+            'use detailed but clear explanations',
+            
+            # Structure markers
+            'start with',
+            'end with',
+            'make sure to',
+            'include',
+            'present',
+            'show how',
+            'set up',
+            'explain',
+            'introduce',
+            
+            # Content elements
+            'friendly character',
+            'friendly characters',
+            'simple terms',
+            'simple adventure',
+            'engaging narrative',
+            'interesting opening',
+            'happy conclusion',
+            'happy ending',
+            'satisfying conclusion',
+            'proper conclusion',
+            'brief glossary',
+            'key terms',
+            'glossary of',
+            
+            # Formatting
+            'paragraphs',
+            'paragraph',
+            'exactly 3 paragraphs',
+            'exactly 4 paragraphs',
+            'exactly 5 paragraphs',
+            
+            # Common instruction words
+            'must',
+            'should',
+            'need to',
+            'have to',
+            'ensure',
+            'make sure',
+            'remember to',
+            'don\'t forget to'
         ]
         
         # Process each line
@@ -368,7 +421,15 @@ class KidsNewsGenerator:
                 story_started = True
             
             # Skip lines that are clearly part of the prompt or before the story starts
-            if not story_started or any(phrase in lower_line for phrase in prompt_phrases):
+            if not story_started:
+                continue
+                
+            # Skip lines that match any prompt phrase
+            if any(phrase in lower_line for phrase in prompt_phrases):
+                continue
+                
+            # Skip lines that match numbered list pattern
+            if re.match(r'^\d+[\.\)]', line):
                 continue
             
             # Add line to current paragraph
@@ -387,7 +448,6 @@ class KidsNewsGenerator:
         cleaned_text = '\n\n'.join(cleaned_lines)
         
         # Clean up any extra whitespace
-        import re
         cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
         
         # Ensure proper paragraph spacing
