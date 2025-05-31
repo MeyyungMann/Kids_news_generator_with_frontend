@@ -2,34 +2,19 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import FeedbackForm from '../components/FeedbackForm';
 
-interface NewsArticle {
-  id: string;
-  title: string;
-  source: string;
-  url: string;
-  published_at: string;
-  category: string;
-  content: string;
-  age_group?: number;
-}
-
-interface NewsResponse {
-  articles: NewsArticle[];
-}
-
-export const Home: React.FC = () => {
+export const Home = () => {
   const [topic, setTopic] = useState('');
   const [ageGroup, setAgeGroup] = useState('3-6');
   const [category, setCategory] = useState('Science');
   const [includeGlossary, setIncludeGlossary] = useState(true);
   const [generateImage, setGenerateImage] = useState(true);
-  const [selectedLanguages, setSelectedLanguages] = useState<string[]>(['en']);
+  const [selectedLanguages, setSelectedLanguages] = useState(['en']);
   const [loading, setLoading] = useState(false);
-  const [article, setArticle] = useState<NewsResponse | null>(null);
+  const [article, setArticle] = useState(null);
   const [error, setError] = useState('');
-  const [articles, setArticles] = useState<NewsArticle[]>([]);
+  const [articles, setArticles] = useState([]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
@@ -53,11 +38,11 @@ export const Home: React.FC = () => {
     }
   };
 
-  const fetchNews = async (category: string) => {
+  const fetchNews = async (category) => {
     setLoading(true);
     setError('');
     try {
-      const response = await axios.get<NewsResponse>(`http://localhost:8000/news/${category.toLowerCase()}`);
+      const response = await axios.get(`http://localhost:8000/news/${category.toLowerCase()}`);
       setArticles(response.data.articles);
     } catch (err) {
       setError('Failed to fetch news articles. Please try again.');

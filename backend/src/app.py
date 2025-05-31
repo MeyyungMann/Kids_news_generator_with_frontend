@@ -17,6 +17,7 @@ from config import Config  # Import the config
 from fastapi.staticfiles import StaticFiles
 from web_search import WebSearcher
 from clip_handler import CLIPHandler
+import os
 
 # Configure logging
 logging.basicConfig(
@@ -553,6 +554,130 @@ async def compute_similarity(request: Dict[str, Any]) -> Dict[str, Any]:
         
     except Exception as e:
         logger.error(f"Error computing similarity: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Add Feedback model
+class FeedbackRequest(BaseModel):
+    article_id: str
+    age_group: int
+    category: str
+    feedback_type: str  # "age_appropriate", "engagement", "clarity"
+    rating: int  # 1-5
+    comments: Optional[str] = None
+
+@app.post("/api/feedback")
+async def submit_feedback(request: FeedbackRequest) -> Dict[str, Any]:
+    """Submit user feedback for an article."""
+    try:
+        logger.info(f"Received feedback for article {request.article_id}")
+        
+        # Create feedback directory if it doesn't exist
+        feedback_dir = Path(__file__).parent.parent / "data" / "feedback"
+        feedback_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create category directory
+        category_dir = feedback_dir / request.category
+        category_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create or update feedback file
+        feedback_file = category_dir / f"{request.article_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        
+        # Load existing feedback if file exists
+        feedback_data = {}
+        if feedback_file.exists():
+            with open(feedback_file, "r") as f:
+                feedback_data = json.load(f)
+        
+        # Initialize feedback structure if not exists
+        if "feedback" not in feedback_data:
+            feedback_data = {
+                "article_id": request.article_id,
+                "age_group": request.age_group,
+                "category": request.category,
+                "timestamp": datetime.now().isoformat(),
+                "feedback": {
+                    "age_appropriate": {"rating": None, "comments": None},
+                    "engagement": {"rating": None, "comments": None},
+                    "clarity": {"rating": None, "comments": None}
+                }
+            }
+        
+        # Update specific feedback type
+        feedback_data["feedback"][request.feedback_type] = {
+            "rating": request.rating,
+            "comments": request.comments
+        }
+        
+        # Save updated feedback
+        with open(feedback_file, "w") as f:
+            json.dump(feedback_data, f, indent=2)
+        
+        # Update the generator with feedback
+        generator.update_with_feedback(feedback_data)
+        
+        return {"message": "Feedback submitted successfully", "feedback_id": feedback_file.stem}
+        
+    except Exception as e:
+        logger.error(f"Error submitting feedback: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/feedback/history")
+async def get_feedback_history(
+    category: Optional[str] = None,
+    age_group: Optional[int] = None,
+    feedback_type: Optional[str] = None
+) -> Dict[str, Any]:
+    """Get feedback history with optional filters."""
+    try:
+        feedback_dir = Path(__file__).parent.parent / "data" / "feedback"
+        if not feedback_dir.exists():
+            return {"feedback": []}
+
+        all_feedback = []
+        
+        # Get all category directories
+        category_dirs = [feedback_dir / cat for cat in os.listdir(feedback_dir) 
+                        if (feedback_dir / cat).is_dir()]
+        
+        # If category is specified, only look in that category
+        if category:
+            category_dirs = [feedback_dir / category]
+        
+        # Process each category directory
+        for cat_dir in category_dirs:
+            if not cat_dir.exists():
+                continue
+                
+            # Read all feedback files in the category
+            for feedback_file in cat_dir.glob("*.json"):
+                try:
+                    with open(feedback_file, "r") as f:
+                        feedback_data = json.load(f)
+                        
+                        # Apply filters
+                        if age_group and feedback_data.get("age_group") != age_group:
+                            continue
+                        if feedback_type and feedback_data.get("feedback_type") != feedback_type:
+                            continue
+                            
+                        all_feedback.append(feedback_data)
+                except Exception as e:
+                    logger.error(f"Error reading feedback file {feedback_file}: {str(e)}")
+                    continue
+        
+        # Sort feedback by timestamp (newest first)
+        all_feedback.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        
+        return {
+            "feedback": all_feedback,
+            "total_count": len(all_feedback),
+            "categories": [cat.name for cat in category_dirs],
+            "age_groups": sorted(list(set(f.get("age_group") for f in all_feedback))),
+            "feedback_types": sorted(list(set(f.get("feedback_type") for f in all_feedback)))
+        }
+        
+    except Exception as e:
+        logger.error(f"Error retrieving feedback history: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

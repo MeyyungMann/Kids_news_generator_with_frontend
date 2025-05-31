@@ -71,6 +71,7 @@ class ReinforcementLogger:
             timestamp = datetime.now().isoformat()
             log_entry = {
                 "timestamp": timestamp,
+                "type": "reward",
                 "reward": reward,
                 "iteration": iteration,
                 "context": context
@@ -91,6 +92,7 @@ class ReinforcementLogger:
             timestamp = datetime.now().isoformat()
             log_entry = {
                 "timestamp": timestamp,
+                "type": "model_update",
                 "loss": loss,
                 "reward": reward,
                 "parameters": parameters
@@ -115,6 +117,7 @@ class ReinforcementLogger:
             timestamp = datetime.now().isoformat()
             log_entry = {
                 "timestamp": timestamp,
+                "type": "improvement",
                 "current_reward": current_reward,
                 "previous_reward": previous_reward,
                 "improvement": improvement,
@@ -140,6 +143,7 @@ class ReinforcementLogger:
             timestamp = datetime.now().isoformat()
             log_entry = {
                 "timestamp": timestamp,
+                "type": "dspy_example",
                 "example": {
                     "topic": example.topic,
                     "age_group": example.age_group,

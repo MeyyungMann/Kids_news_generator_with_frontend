@@ -136,23 +136,64 @@ class WebSearcher:
             return ""
     
     def _categorize_article(self, text: str) -> str:
-        """Categorize article based on content."""
+        """Categorize article based on content with improved accuracy."""
         categories = {
-            'science': ['science', 'research', 'study', 'discovery', 'scientist'],
-            'technology': ['tech', 'technology', 'digital', 'computer', 'software', 'hardware'],
-            'health': ['health', 'medical', 'medicine', 'disease', 'treatment'],
-            'environment': ['environment', 'climate', 'nature', 'earth', 'pollution'],
-            'economy': ['economy', 'business', 'market', 'finance', 'money']
+            'science': {
+                'keywords': ['science', 'research', 'study', 'discovery', 'scientist', 'experiment', 'laboratory', 'physics', 'chemistry', 'biology', 'astronomy', 'genetics', 'microscope', 'data', 'analysis',
+    'theory', 'hypothesis', 'observation', 'peer-reviewed'],
+                'weight': 1.0
+            },
+            'technology': {
+                'keywords': ['tech', 'technology', 'digital', 'computer', 'software', 'hardware', 'app', 'platform',
+    'AI', 'artificial intelligence', 'machine learning', 'robotics', 'smartphone', 'gadget',
+    'internet', 'cybersecurity', 'cloud', 'data science', 'programming', 'code', 'startup', 'innovation'
+],
+                'weight': 0.8  # Lower weight for common tech terms
+            },
+            'health': {
+                'keywords': ['health', 'medical', 'medicine', 'disease', 'treatment', 'doctor', 'patient', 'mental health', 'therapy', 'psychologist', 'hospital', 'clinic', 'vaccine', 
+    'symptoms', 'diagnosis', 'public health', 'nutrition', 'exercise', 'wellness', 
+    'nurse', 'epidemic', 'pandemic', 'infection', 'surgery'],
+                'weight': 1.2  # Higher weight for health terms
+            },
+            'environment': {
+                'keywords': ['environment', 'climate', 'nature', 'earth', 'pollution', 'sustainability', 'green',
+    'global warming', 'carbon', 'recycle', 'biodiversity', 'conservation', 'wildlife',
+    'eco-friendly', 'deforestation', 'renewable', 'fossil fuels', 'solar', 'wind', 
+    'natural disaster', 'climate change', 'greenhouse gas'],
+                'weight': 1.0
+            },
+            'economy': {
+                'keywords': ['economy', 'business', 'market', 'finance', 'money', 'investment', 'stock',
+    'trade', 'inflation', 'recession', 'budget', 'tax', 'bank', 'interest rate',
+    'cryptocurrency', 'bitcoin', 'employment', 'job market', 'GDP', 'economic growth'
+],
+                'weight': 1.0
+            }
         }
         
         text = text.lower()
-        max_matches = 0
+        max_score = 0
         best_category = 'general'
         
-        for category, keywords in categories.items():
-            matches = sum(1 for keyword in keywords if keyword in text)
-            if matches > max_matches:
-                max_matches = matches
+        # First pass: count keyword matches
+        for category, info in categories.items():
+            matches = sum(1 for keyword in info['keywords'] if keyword in text)
+            score = matches * info['weight']
+            
+            # Additional context checks
+            if category == 'health' and any(term in text for term in ['mental', 'psychology', 'therapy', 'counseling']):
+                score *= 1.5  # Boost health score for mental health content
+                
+            if category == 'technology' and any(term in text for term in ['parenting', 'family', 'children', 'education']):
+                score *= 0.5  # Reduce tech score for family/education content
+                
+            if score > max_score:
+                max_score = score
                 best_category = category
         
-        return best_category 
+        # Only return category if it has sufficient matches
+        if max_score >= 2:
+            return best_category
+        
+        return 'general' 

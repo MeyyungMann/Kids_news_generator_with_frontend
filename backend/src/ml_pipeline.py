@@ -9,6 +9,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from image_generator import KidFriendlyImageGenerator
 from config import Config
 from rag_system import RAGSystem
+from rl_system import RLSystem  # Import the RL system
 
 # Configure logging
 logging.basicConfig(
@@ -28,11 +29,13 @@ class KidsNewsGenerator:
         self.base_dir = Config.RESULTS_DIR
         self.summaries_dir = self.base_dir / "summaries"
         self.images_dir = self.base_dir / "images"
+        self.feedback_dir = Path(__file__).parent.parent / "data" / "feedback"
         
         # Create directories
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.summaries_dir.mkdir(parents=True, exist_ok=True)
         self.images_dir.mkdir(parents=True, exist_ok=True)
+        self.feedback_dir.mkdir(parents=True, exist_ok=True)
         
         # Initialize components
         self._init_model()
@@ -44,6 +47,12 @@ class KidsNewsGenerator:
         # Initialize RAG system without loading articles
         self.rag = RAGSystem()
         self.articles_loaded = False
+        
+        # Initialize RL system
+        self.rl_system = RLSystem()
+        
+        # Load feedback data
+        self.feedback_data = self._load_feedback_data()
     
     def _init_model(self):
         """Initialize the language model."""
@@ -148,10 +157,82 @@ class KidsNewsGenerator:
             self.rag.load_news_articles()
             self.articles_loaded = True
     
+    def _load_feedback_data(self) -> Dict[str, Any]:
+        """Load and aggregate feedback data."""
+        feedback_data = {
+            "age_appropriate": {},
+            "engagement": {},
+            "clarity": {}
+        }
+        
+        try:
+            # Load feedback from all category directories
+            for category_dir in self.feedback_dir.glob("*"):
+                if not category_dir.is_dir():
+                    continue
+                    
+                for feedback_file in category_dir.glob("*.json"):
+                    try:
+                        with open(feedback_file, "r") as f:
+                            feedback = json.load(f)
+                            
+                            # Aggregate feedback by type and age group
+                            feedback_type = feedback["feedback_type"]
+                            age_group = str(feedback["age_group"])
+                            
+                            if age_group not in feedback_data[feedback_type]:
+                                feedback_data[feedback_type][age_group] = {
+                                    "total_rating": 0,
+                                    "count": 0,
+                                    "comments": []
+                                }
+                            
+                            feedback_data[feedback_type][age_group]["total_rating"] += feedback["rating"]
+                            feedback_data[feedback_type][age_group]["count"] += 1
+                            
+                            if feedback.get("comments"):
+                                feedback_data[feedback_type][age_group]["comments"].append(feedback["comments"])
+                    except Exception as e:
+                        logger.error(f"Error loading feedback file {feedback_file}: {str(e)}")
+                        continue
+                        
+            return feedback_data
+        except Exception as e:
+            logger.error(f"Error loading feedback data: {str(e)}")
+            return feedback_data
+
+    def _get_feedback_insights(self, age_group: int) -> Dict[str, Any]:
+        """Get insights from feedback for a specific age group."""
+        age_group_str = str(age_group)
+        insights = {
+            "age_appropriate": 0,
+            "engagement": 0,
+            "clarity": 0,
+            "suggestions": []
+        }
+        
+        # Calculate average ratings
+        for feedback_type in ["age_appropriate", "engagement", "clarity"]:
+            if age_group_str in self.feedback_data[feedback_type]:
+                data = self.feedback_data[feedback_type][age_group_str]
+                if data["count"] > 0:
+                    insights[feedback_type] = data["total_rating"] / data["count"]
+                    insights["suggestions"].extend(data["comments"])
+        
+        return insights
+
     def generate_news(self, topic: str, age_group: int) -> Dict[str, Any]:
         """Generate kid-friendly news content."""
         try:
             logger.info(f"Starting news generation for topic: {topic}, age group: {age_group}")
+            
+            # Get feedback insights
+            feedback_insights = self._get_feedback_insights(age_group)
+            logger.info(f"Using feedback insights: {feedback_insights}")
+            
+            # Get RL-based generation guidelines
+            rl_guidelines = self.rl_system.get_generation_guidelines(age_group, "general")
+            logger.info(f"Using RL guidelines: {rl_guidelines}")
             
             # Ensure articles are loaded before searching
             self.ensure_articles_loaded()
@@ -165,10 +246,31 @@ class KidsNewsGenerator:
                 logger.error(f"Error searching for relevant documents: {str(e)}")
                 raise
             
-            # Create prompt with relevant facts
+            # Create prompt with relevant facts and feedback insights
             try:
                 context = "\n".join([doc['document'] for doc in relevant_docs])
-                logger.info("Created context from relevant documents")
+                
+                # Add feedback-based instructions
+                feedback_instructions = []
+                if feedback_insights["age_appropriate"] < 4:
+                    feedback_instructions.append("Use simpler vocabulary and shorter sentences")
+                if feedback_insights["engagement"] < 4:
+                    feedback_instructions.append("Add more interactive elements and questions")
+                if feedback_insights["clarity"] < 4:
+                    feedback_instructions.append("Provide more examples and explanations")
+                
+                # Add RL-based instructions
+                if rl_guidelines['vocabulary_complexity'] < 0.4:
+                    feedback_instructions.append("Use very simple vocabulary")
+                if rl_guidelines['interactive_elements']:
+                    feedback_instructions.append("Include interactive elements and questions")
+                if rl_guidelines['example_count'] > 2:
+                    feedback_instructions.append("Provide multiple examples")
+                
+                if feedback_instructions:
+                    context += "\n\nBased on user feedback and learning, please ensure to:\n" + "\n".join(f"- {instruction}" for instruction in feedback_instructions)
+                
+                logger.info("Created context from relevant documents and feedback")
             except Exception as e:
                 logger.error(f"Error creating context: {str(e)}")
                 raise
@@ -478,11 +580,36 @@ class KidsNewsGenerator:
                     "timestamp": timestamp,
                     "age_group": article_data.get("age_group", 7),
                     "category": category,
-                    "original_article": article_data
+                    "original_article": article_data,
+                    "rl_guidelines": self.rl_system.get_generation_guidelines(
+                        article_data.get("age_group", 7),
+                        category
+                    )
                 }, f, indent=2)
             
             logger.info(f"Summary saved to {summary_path}")
             
         except Exception as e:
             logger.error(f"Error saving summary: {str(e)}")
+            raise
+
+    def update_with_feedback(self, feedback_data: Dict[str, Any]) -> None:
+        """Update the system with new feedback."""
+        try:
+            # Update RL system
+            self.rl_system.update_with_feedback(feedback_data)
+            
+            # Save feedback
+            category = feedback_data.get("category", "general").capitalize()
+            feedback_dir = self.feedback_dir / category
+            feedback_dir.mkdir(parents=True, exist_ok=True)
+            
+            feedback_file = feedback_dir / f"{feedback_data['article_id']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            with open(feedback_file, "w") as f:
+                json.dump(feedback_data, f, indent=2)
+            
+            logger.info(f"Feedback saved to {feedback_file}")
+            
+        except Exception as e:
+            logger.error(f"Error updating with feedback: {str(e)}")
             raise 

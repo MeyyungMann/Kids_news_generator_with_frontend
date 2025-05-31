@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import ArticleHistory from './components/ArticleHistory';
 import WebSearch from './components/WebSearch';
+import FeedbackForm from './components/FeedbackForm';
 import './App.css';
 
 function App() {
@@ -303,61 +304,46 @@ function App() {
                       )}
 
                       {article && (
-                        <div className="mt-6 space-y-6">
-                          <div className="bg-white shadow overflow-hidden sm:rounded-lg">
-                            <div className="px-4 py-5 sm:px-6">
-                              <h3 className="text-lg leading-6 font-medium text-gray-900">{article.title}</h3>
-                              <p className="mt-1 max-w-2xl text-sm text-gray-500">
-                                Category: {article.category} | Reading Level: {article.reading_level}
-                              </p>
+                        <div className="mt-6 bg-white rounded-lg shadow overflow-hidden">
+                          <div className="p-6">
+                            <h2 className="text-2xl font-bold text-gray-900 mb-2">{article.title}</h2>
+                            <div className="prose max-w-none">
+                              {article.content.split('\n').map((paragraph, i) => (
+                                <p key={i} className="mb-4">{paragraph}</p>
+                              ))}
                             </div>
-                            <div className="border-t border-gray-200">
-                              <div className="px-4 py-5 sm:p-6 prose max-w-none">
-                                {article.image_url && (
-                                  <div className="relative">
-                                    <img
-                                      src={article.image_url}
-                                      alt={article.title}
-                                      className="w-full max-h-[500px] object-contain rounded-lg mb-6 shadow-md"
-                                    />
-                                    {article.clip_similarity_score && (
-                                      <div className="absolute top-2 right-2 bg-white bg-opacity-90 px-3 py-1 rounded-full shadow-md">
-                                        <span className="text-sm font-medium text-gray-700">
-                                          Image Relevance: {article.clip_similarity_score.toFixed(1)}%
-                                        </span>
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                                <div className="whitespace-pre-wrap">{article.content}</div>
-                                
-                                {/* Updated original article link section */}
-                                {article.original_article && (
-                                  <div className="mt-6 pt-4 border-t border-gray-200">
-                                    <div className="flex flex-col space-y-4">
-                                      <div>
-                                        <h4 className="text-lg font-medium text-gray-900">Source Article</h4>
-                                        <p className="text-sm text-gray-500">
-                                          {article.original_article.source} • {new Date(article.original_article.published_at).toLocaleDateString()}
-                                        </p>
-                                      </div>
-                                      <div className="flex flex-col space-y-2">
-                                        <a
-                                          href={article.original_article.url}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200"
-                                        >
-                                          Read Original Article
-                                        </a>
-                                        <p className="text-sm text-gray-500 text-center">
-                                          Opens in a new tab
-                                        </p>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
+                            {article.image_url && (
+                              <img
+                                src={article.image_url}
+                                alt={article.title}
+                                className="mt-4 rounded-lg shadow-md"
+                              />
+                            )}
+                            {article.original_article && (
+                              <div className="mt-6 border-t pt-6">
+                                <div className="flex flex-col space-y-2">
+                                  <p className="text-sm text-gray-500">
+                                    Source: {article.original_article.source} • {new Date(article.original_article.published_at).toLocaleDateString()}
+                                  </p>
+                                  {article.original_article.original_article?.url && (
+                                    <a
+                                      href={article.original_article.original_article.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200"
+                                    >
+                                      Read Original Article
+                                    </a>
+                                  )}
+                                </div>
                               </div>
+                            )}
+                            <div className="mt-6 border-t pt-6">
+                              <FeedbackForm
+                                articleId={article.id || Date.now().toString()}
+                                ageGroup={getAgeGroupNumber(selectedAgeGroup)}
+                                category={selectedCategory}
+                              />
                             </div>
                           </div>
                         </div>
