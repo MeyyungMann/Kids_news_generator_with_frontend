@@ -325,9 +325,9 @@ function App() {
                                   <p className="text-sm text-gray-500">
                                     Source: {article.original_article.source} • {new Date(article.original_article.published_at).toLocaleDateString()}
                                   </p>
-                                  {article.original_article.original_article?.url && (
+                                  {article.original_article.url && (
                                     <a
-                                      href={article.original_article.original_article.url}
+                                      href={article.original_article.url}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       className="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200"
