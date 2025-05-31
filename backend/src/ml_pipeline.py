@@ -185,7 +185,7 @@ class KidsNewsGenerator:
                     3. End with a happy conclusion
                     
                     Use very simple words and write exactly 3 paragraphs. End with "Wasn't that fun?" or "The end!"
-                    Do not add any extra text after the story ends.
+                 
                     """
 
                 elif 7 <= age_group <= 9:  # Early Elementary
@@ -199,7 +199,7 @@ class KidsNewsGenerator:
                     4. End with a satisfying conclusion
                     
                     Use clear, simple language and write exactly 4 paragraphs. Make sure to tie everything together at the end.
-                    Do not add any extra text after the story ends.
+                   
                     """
 
                 else:  # Upper Elementary
@@ -221,7 +221,6 @@ class KidsNewsGenerator:
                     - Term 2: Simple definition
                     - Term 3: Simple definition
                     
-                    Do not add any extra text after the glossary.
                     """
 
                 logger.info("Created prompt for model")

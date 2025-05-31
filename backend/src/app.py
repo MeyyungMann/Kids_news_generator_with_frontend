@@ -306,10 +306,10 @@ async def get_categories() -> List[str]:
     return CATEGORIES
 
 @app.get("/api/articles/history")
-async def get_article_history(category: str = "all") -> Dict[str, Any]:
+async def get_article_history(category: str = "all", age_group: str = "all") -> Dict[str, Any]:
     """Get history of generated articles."""
     try:
-        logger.info(f"Fetching article history for category: {category}")
+        logger.info(f"Fetching article history for category: {category}, age_group: {age_group}")
         
         # Get the summaries directory
         summaries_dir = Path(__file__).parent.parent / "results" / "summaries"
@@ -334,6 +334,12 @@ async def get_article_history(category: str = "all") -> Dict[str, Any]:
                 try:
                     with open(summary_file, 'r', encoding='utf-8') as f:
                         summary_data = json.load(f)
+                        
+                        # Filter by age group if specified
+                        if age_group != "all":
+                            article_age_group = summary_data.get('age_group', 7)
+                            if str(article_age_group) != age_group.split('-')[0]:
+                                continue
                         
                         # Get corresponding image if it exists
                         image_path = None
