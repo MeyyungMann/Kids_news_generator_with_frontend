@@ -8,6 +8,7 @@ const ArticleHistory = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [showPrompts, setShowPrompts] = useState({});  // Track which articles show prompts
+    const [deleteLoading, setDeleteLoading] = useState({});  // Track which articles are being deleted
 
     const categories = [
         { id: 'all', name: 'All Categories' },
@@ -82,6 +83,46 @@ const ArticleHistory = () => {
             .trim();
     };
 
+    const handleDelete = async (article, index) => {
+        try {
+            setDeleteLoading(prev => ({ ...prev, [index]: true }));
+            
+            // Debug logging
+            console.log('Article data:', {
+                topic: article.topic,
+                timestamp: article.timestamp,
+                original_article: article.original_article
+            });
+            
+            // Get the category from the article data
+            const category = article.original_article?.category || article.original_article?.original_article?.category;
+            console.log('Extracted category:', category);
+            
+            if (!category) {
+                throw new Error('Category not found for article');
+            }
+            
+            // Extract filename from the article data
+            const filename = `${article.topic.replace(/[^a-zA-Z0-9]/g, '_')}_${article.timestamp}.json`;
+            console.log('Generated filename:', filename);
+            
+            // Call the delete endpoint
+            await axios.delete(`/api/articles/${category}/${filename}`);
+            
+            // Remove the article from the state
+            setArticles(prev => prev.filter((_, i) => i !== index));
+            
+            // Show success message
+            alert('Article deleted successfully');
+        } catch (err) {
+            console.error('Error deleting article:', err);
+            console.error('Article data:', article);
+            alert(err.message || 'Failed to delete article. Please try again.');
+        } finally {
+            setDeleteLoading(prev => ({ ...prev, [index]: false }));
+        }
+    };
+
     return (
         <div className="max-w-4xl mx-auto p-4">
             <div className="mb-6">
@@ -143,6 +184,17 @@ const ArticleHistory = () => {
                                     className="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-full transition-colors"
                                 >
                                     {showPrompts[index] ? 'Hide Prompts' : 'Show Prompts'}
+                                </button>
+                                <button
+                                    onClick={() => handleDelete(article, index)}
+                                    disabled={deleteLoading[index]}
+                                    className={`px-3 py-1 text-sm rounded-full transition-colors ${
+                                        deleteLoading[index]
+                                            ? 'bg-gray-300 cursor-not-allowed'
+                                            : 'bg-red-100 text-red-700 hover:bg-red-200'
+                                    }`}
+                                >
+                                    {deleteLoading[index] ? 'Deleting...' : 'Delete'}
                                 </button>
                                 <span className="text-sm text-gray-500">
                                     {new Date(article.timestamp).toLocaleDateString()}

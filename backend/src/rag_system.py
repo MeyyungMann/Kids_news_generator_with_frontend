@@ -15,12 +15,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class RAGSystem:
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2", max_documents: int = 1000):
         """Initialize the RAG system with FAISS index and sentence transformer."""
         self.model = SentenceTransformer(model_name)
         self.index = None
         self.documents = []
         self.document_metadata = []
+        self.max_documents = max_documents
         
         # Create directory for storing the index
         self.index_dir = Path(__file__).parent.parent / "data" / "rag_index"
@@ -83,26 +84,36 @@ class RAGSystem:
         except Exception as e:
             logger.error(f"Error saving index: {str(e)}")
     
+    def _maintain_sliding_window(self, new_documents: List[str], new_metadata: List[Dict[str, Any]]):
+        """Maintain a sliding window of documents by removing oldest documents when limit is exceeded."""
+        # Add new documents and metadata
+        self.documents.extend(new_documents)
+        self.document_metadata.extend(new_metadata)
+        
+        # If we exceed the limit, remove oldest documents
+        if len(self.documents) > self.max_documents:
+            # Calculate how many documents to remove
+            num_to_remove = len(self.documents) - self.max_documents
+            
+            # Remove oldest documents and metadata
+            self.documents = self.documents[num_to_remove:]
+            self.document_metadata = self.document_metadata[num_to_remove:]
+            
+            logger.info(f"Removed {num_to_remove} oldest documents to maintain limit of {self.max_documents}")
+    
     def add_documents(self, documents: List[str], metadata: Optional[List[Dict[str, Any]]] = None):
         """Add documents to the index."""
         try:
             # Generate embeddings for new documents
             embeddings = self.model.encode(documents, show_progress_bar=True)
             
-            # Add embeddings to the index
-            self.index.add(np.array(embeddings).astype('float32'))
+            # Maintain sliding window of documents
+            self._maintain_sliding_window(documents, metadata or [{} for _ in documents])
             
-            # Store documents and metadata
-            self.documents.extend(documents)
-            if metadata:
-                self.document_metadata.extend(metadata)
-            else:
-                self.document_metadata.extend([{} for _ in documents])
+            # Create new index with current documents
+            self._create_or_update_index()
             
-            # Save the updated index
-            self._save_index()
-            
-            logger.info(f"Added {len(documents)} documents to the index")
+            logger.info(f"Added {len(documents)} documents to the index (total: {len(self.documents)})")
         except Exception as e:
             logger.error(f"Error adding documents: {str(e)}")
             raise
@@ -194,6 +205,10 @@ class RAGSystem:
                 logger.warning("No news articles directory found")
                 return
             
+            # Clear existing documents to start fresh
+            self.documents = []
+            self.document_metadata = []
+            
             # Load articles from each category
             for category_dir in self.news_documents_dir.iterdir():
                 if category_dir.is_dir():
@@ -219,6 +234,13 @@ class RAGSystem:
                         except Exception as e:
                             logger.error(f"Error loading article {article_file.name}: {str(e)}")
                             continue
+            
+            # Apply document limit if needed
+            if len(self.documents) > self.max_documents:
+                logger.info(f"Limiting documents from {len(self.documents)} to {self.max_documents}")
+                # Keep only the most recent documents
+                self.documents = self.documents[-self.max_documents:]
+                self.document_metadata = self.document_metadata[-self.max_documents:]
             
             # Create or update the index
             if self.documents:

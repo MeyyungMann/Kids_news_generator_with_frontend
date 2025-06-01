@@ -38,11 +38,68 @@ class NewsAPIHandler:
         
         # Single source of truth for category mapping
         self.category_mapping = {
-            "Economy": {"api": "business", "rag": "economy", "keywords": ['economy', 'business', 'market', 'finance', 'trade', 'stock', 'investment']},
-            "Science": {"api": "science", "rag": "science", "keywords": ['science', 'research', 'study', 'discovery', 'scientist', 'experiment']},
-            "Technology": {"api": "technology", "rag": "technology", "keywords": ['technology', 'tech', 'digital', 'software', 'hardware', 'computer', 'internet']},
-            "Health": {"api": "health", "rag": "health", "keywords": ['health', 'medical', 'disease', 'treatment', 'doctor', 'hospital', 'medicine']},
-            "Environment": {"api": "general", "rag": "environment", "keywords": ['environment', 'climate', 'nature', 'pollution', 'conservation', 'earth', 'planet']}
+            "Economy": {
+                "api": "business",
+                "rag": "economy",
+                "keywords": [
+                    'economy', 'business', 'market', 'finance', 'trade', 'stock', 'investment',
+                    'economic', 'financial', 'banking', 'currency', 'dollar', 'euro', 'yen',
+                    'inflation', 'recession', 'growth', 'gdp', 'employment', 'unemployment',
+                    'industry', 'corporate', 'company', 'enterprise', 'startup', 'venture',
+                    'profit', 'revenue', 'income', 'wealth', 'tax', 'budget', 'debt'
+                ]
+            },
+            "Science": {
+                "api": "science",
+                "rag": "science",
+                "keywords": [
+                    'science', 'research', 'study', 'discovery', 'scientist', 'experiment',
+                    'laboratory', 'lab', 'physics', 'chemistry', 'biology', 'astronomy',
+                    'space', 'universe', 'planet', 'star', 'galaxy', 'moon', 'mars',
+                    'genetics', 'dna', 'evolution', 'species', 'ecosystem', 'climate',
+                    'environment', 'technology', 'innovation', 'breakthrough', 'theory',
+                    'hypothesis', 'analysis', 'data', 'evidence', 'observation'
+                ]
+            },
+            "Technology": {
+                "api": "technology",
+                "rag": "technology",
+                "keywords": [
+                    'technology', 'tech', 'digital', 'software', 'hardware', 'computer', 'internet',
+                    'artificial intelligence', 'ai', 'machine learning', 'ml', 'data science',
+                    'programming', 'coding', 'developer', 'app', 'application', 'mobile',
+                    'smartphone', 'laptop', 'tablet', 'device', 'gadget', 'innovation',
+                    'startup', 'cybersecurity', 'privacy', 'blockchain', 'crypto',
+                    'virtual reality', 'vr', 'augmented reality', 'ar', 'robotics',
+                    'automation', 'cloud', 'server', 'network', 'wireless', '5g'
+                ]
+            },
+            "Health": {
+                "api": "health",
+                "rag": "health",
+                "keywords": [
+                    'health', 'medical', 'disease', 'treatment', 'doctor', 'hospital', 'medicine',
+                    'healthcare', 'patient', 'clinic', 'pharmacy', 'drug', 'vaccine',
+                    'virus', 'infection', 'symptom', 'diagnosis', 'therapy', 'surgery',
+                    'mental health', 'psychology', 'wellness', 'fitness', 'nutrition',
+                    'diet', 'exercise', 'lifestyle', 'prevention', 'research', 'study',
+                    'clinical trial', 'emergency', 'ambulance', 'paramedic', 'nurse',
+                    'specialist', 'pediatric', 'geriatric', 'oncology', 'cardiology'
+                ]
+            },
+            "Environment": {
+                "api": "general",
+                "rag": "environment",
+                "keywords": [
+                    'environment', 'climate', 'nature', 'pollution', 'conservation', 'earth', 'planet',
+                    'global warming', 'climate change', 'greenhouse', 'emission', 'carbon',
+                    'renewable', 'solar', 'wind', 'energy', 'sustainable', 'sustainability',
+                    'ecosystem', 'biodiversity', 'wildlife', 'animal', 'plant', 'forest',
+                    'ocean', 'sea', 'river', 'mountain', 'desert', 'wildlife', 'habitat',
+                    'recycling', 'waste', 'plastic', 'pollution', 'clean', 'green',
+                    'conservation', 'preservation', 'protection', 'natural resource'
+                ]
+            }
         }
         
         # Frontend categories
@@ -221,16 +278,30 @@ class NewsAPIHandler:
         """Validate article content for specific category requirements."""
         try:
             if not article.get('content'):
+                logger.warning(f"No content found for article: {article.get('title', '')}")
                 return False
                 
             content = article['content'].lower()
             keywords = self.category_mapping[category]["keywords"]
             
-            # Check if content contains category-specific keywords
-            keyword_matches = sum(1 for keyword in keywords if keyword in content)
+            # Log the content length and first 100 characters
+            logger.info(f"Content length: {len(content)}")
+            logger.info(f"Content preview: {content[:100]}")
             
-            # Require at least 2 keyword matches for validation
-            return keyword_matches >= 2
+            # Check if content contains category-specific keywords
+            keyword_matches = []
+            for keyword in keywords:
+                if keyword in content:
+                    keyword_matches.append(keyword)
+            
+            # Log found keywords
+            logger.info(f"Found keywords for {category}: {keyword_matches}")
+            
+            # Require at least 1 keyword match for validation (reduced from 2)
+            is_valid = len(keyword_matches) >= 1
+            logger.info(f"Article validation result: {is_valid} (found {len(keyword_matches)} keywords)")
+            
+            return is_valid
             
         except Exception as e:
             logger.error(f"Error validating article content: {str(e)}")

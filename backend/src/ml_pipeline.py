@@ -10,6 +10,7 @@ from image_generator import KidFriendlyImageGenerator
 from config import Config
 from rag_system import RAGSystem
 from rl_system import RLSystem  # Import the RL system
+import asyncio
 
 # Configure logging
 logging.basicConfig(
@@ -44,9 +45,17 @@ class KidsNewsGenerator:
         # System diagnostics
         self.diagnostics = self._get_system_diagnostics()
         
-        # Initialize RAG system without loading articles
-        self.rag = RAGSystem()
-        self.articles_loaded = False
+        # Initialize RAG system with proper error handling
+        try:
+            self.rag = RAGSystem()
+            # Load articles immediately during initialization
+            self.rag.load_news_articles()
+            self.articles_loaded = True
+            logger.info("RAG system initialized and articles loaded successfully")
+        except Exception as e:
+            logger.error(f"Error initializing RAG system: {str(e)}")
+            self.rag = None
+            self.articles_loaded = False
         
         # Initialize RL system
         self.rl_system = RLSystem()
@@ -153,10 +162,55 @@ class KidsNewsGenerator:
     def ensure_articles_loaded(self):
         """Ensure articles are loaded into the RAG system."""
         if not self.articles_loaded:
-            logger.info("Loading articles into RAG system...")
-            self.rag.load_news_articles()
-            self.articles_loaded = True
-    
+            try:
+                logger.info("Loading articles into RAG system...")
+                if self.rag is None:
+                    self.rag = RAGSystem()
+                self.rag.load_news_articles()
+                self.articles_loaded = True
+                logger.info("Articles loaded successfully")
+            except Exception as e:
+                logger.error(f"Error loading articles: {str(e)}")
+                raise RuntimeError(f"Failed to load articles: {str(e)}")
+
+    def update_rag_with_new_article(self, article: Dict[str, Any]):
+        """Update RAG system with a new article."""
+        try:
+            # Prepare article for RAG
+            rag_doc = {
+                'title': article['title'],
+                'source': article['source'],
+                'url': article['url'],
+                'published_at': article['published_at'],
+                'category': article['category'],
+                'chunks': [article['content']],  # Use full content as one chunk
+                'metadata': {
+                    'source': article['source'],
+                    'url': article['url'],
+                    'published_at': article['published_at'],
+                    'category': article['category']
+                }
+            }
+            
+            # Add to RAG system
+            self.rag._maintain_sliding_window(
+                new_documents=[article['content']],
+                new_metadata=[{
+                    'title': article['title'],
+                    'source': article['source'],
+                    'url': article['url'],
+                    'category': article['category'],
+                    'published_at': article['published_at']
+                }]
+            )
+            
+            # Update index
+            self.rag._create_or_update_index()
+            logger.info(f"Updated RAG system with new article: {article['title']}")
+            
+        except Exception as e:
+            logger.error(f"Error updating RAG with new article: {str(e)}")
+
     def _load_feedback_data(self) -> Dict[str, Any]:
         """Load and aggregate feedback data."""
         feedback_data = {
@@ -221,10 +275,81 @@ class KidsNewsGenerator:
         
         return insights
 
-    def generate_news(self, topic: str, age_group: int) -> Dict[str, Any]:
+    async def generate_news(self, topic: str, age_group: int) -> Dict[str, Any]:
         """Generate kid-friendly news content."""
         try:
-            logger.info(f"Starting news generation for topic: {topic}, age group: {age_group}")
+            logger.info(f"Starting news generation for topic: {topic}, age_group: {age_group}")
+            
+            # Validate URL if topic is a URL
+            if topic.startswith(('http://', 'https://')):
+                try:
+                    # Basic URL validation
+                    from urllib.parse import urlparse
+                    parsed_url = urlparse(topic)
+                    if not all([parsed_url.scheme, parsed_url.netloc]):
+                        raise ValueError("Invalid URL format")
+                    
+                    # Try to extract content from URL
+                    try:
+                        import requests
+                        from bs4 import BeautifulSoup
+                        
+                        headers = {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                        }
+                        
+                        response = requests.get(topic, headers=headers, timeout=10)
+                        response.raise_for_status()
+                        
+                        soup = BeautifulSoup(response.text, 'html.parser')
+                        
+                        # Remove unwanted elements
+                        for element in soup(['script', 'style', 'nav', 'footer', 'header']):
+                            element.decompose()
+                        
+                        # Extract main content
+                        article_text = soup.get_text(separator=' ', strip=True)
+                        
+                        if not article_text or len(article_text) < 100:
+                            raise ValueError("Could not extract meaningful content from URL")
+                        
+                        # Use the extracted content as the topic
+                        topic = article_text[:500]  # Use first 500 characters as topic
+                        logger.info("Successfully extracted content from URL")
+                        
+                    except requests.RequestException as e:
+                        logger.error(f"Error fetching URL: {str(e)}")
+                        raise ValueError(f"Could not access URL: {str(e)}")
+                    except Exception as e:
+                        logger.error(f"Error extracting content: {str(e)}")
+                        raise ValueError(f"Error extracting content: {str(e)}")
+                        
+                except ValueError as e:
+                    logger.error(f"URL validation error: {str(e)}")
+                    raise ValueError(f"Invalid URL or content extraction failed: {str(e)}")
+            
+            # Simplify title for younger age groups
+            if 3 <= age_group <= 6:  # Preschool
+                # Remove source and complex parts
+                topic = re.sub(r'\s*-\s*[^-]+$', '', topic)  # Remove source
+                topic = re.sub(r'\d+\.?\d*\s*billion', '', topic)  # Remove numbers
+                topic = re.sub(r'\b(urgent|warning|breaking|critical)\b', '', topic, flags=re.IGNORECASE)
+                topic = re.sub(r'\b(users|devices|technology)\b', '', topic, flags=re.IGNORECASE)
+                topic = f"Fun Story About {topic}"
+                
+            elif 7 <= age_group <= 9:  # Early Elementary
+                # Keep basic structure but simplify
+                topic = re.sub(r'\s*-\s*[^-]+$', '', topic)  # Remove source
+                topic = re.sub(r'\d+\.?\d*\s*billion', 'many', topic)  # Replace numbers
+                topic = re.sub(r'\b(urgent|warning|breaking)\b', 'important', topic, flags=re.IGNORECASE)
+                topic = f"Kids News: {topic}"
+            
+            logger.info(f"Using simplified topic: {topic}")
+            
+            # Ensure RAG system is initialized and articles are loaded
+            if self.rag is None:
+                raise RuntimeError("RAG system not initialized")
+            await self.ensure_articles_loaded()
             
             # Get feedback insights
             feedback_insights = self._get_feedback_insights(age_group)
@@ -234,17 +359,31 @@ class KidsNewsGenerator:
             rl_guidelines = self.rl_system.get_generation_guidelines(age_group, "general")
             logger.info(f"Using RL guidelines: {rl_guidelines}")
             
-            # Ensure articles are loaded before searching
-            self.ensure_articles_loaded()
+            # Search for relevant news articles with retry logic
+            max_retries = 3
+            retry_delay = 1  # seconds
+            relevant_docs = []
             
-            # First, search for relevant news articles
-            logger.info("Searching for relevant documents...")
-            try:
-                relevant_docs = self.rag.search(topic, k=3)
-                logger.info(f"Found {len(relevant_docs)} relevant documents")
-            except Exception as e:
-                logger.error(f"Error searching for relevant documents: {str(e)}")
-                raise
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"Searching for relevant documents (attempt {attempt + 1}/{max_retries})...")
+                    relevant_docs = await self.rag.search(topic, k=3)
+                    if relevant_docs:
+                        logger.info(f"Found {len(relevant_docs)} relevant documents")
+                        break
+                    else:
+                        logger.warning(f"No relevant documents found on attempt {attempt + 1}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(retry_delay)
+                except Exception as e:
+                    logger.error(f"Error searching for documents (attempt {attempt + 1}): {str(e)}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delay)
+                    else:
+                        raise
+            
+            if not relevant_docs:
+                raise RuntimeError("No relevant documents found after all retries")
             
             # Create prompt with relevant facts and feedback insights
             try:
@@ -278,54 +417,73 @@ class KidsNewsGenerator:
             # Create prompt based on age group
             try:
                 if 3 <= age_group <= 6:  # Preschool
-                    prompt = f"""You are a children's storyteller. Write a story about "{topic}" using these facts:
+                    prompt = f"""
+                    You are a friendly storyteller for young children.
+
+                    Write a complete story for a child aged {age_group} about "{topic}" using these facts:
                     {context}
-                    
+
+                    STORY STARTS BELOW:
                     The story must:
                     1. Start with "Once upon a time" and introduce a friendly character
-                    2. Explain the topic in simple terms
-                    3. End with a happy conclusion
+                    2. Use very simple words and short sentences (3-5 words)
+                    3. Include basic emotions (happy, sad, excited)
+                    4. **Separate each paragraph with a blank line.**
+                    5. End with a happy conclusion and a simple lesson
+                    6. Make sure to complete the entire story before ending
                     
-                    Use very simple words and write exactly 3 paragraphs. End with "Wasn't that fun?" or "The end!"
-                 
+                    Write exactly 3 short paragraphs. Each paragraph should be 2-3 sentences.
+                    Use words that a {age_group}-year-old can understand.
+                    End with "Wasn't that fun?" or "The end!"
+
+
                     """
 
                 elif 7 <= age_group <= 9:  # Early Elementary
-                    prompt = f"""You are a children's storyteller. Write a story about "{topic}" using these facts:
+                    prompt = f"""
+                    You are a friendly storyteller for young children.
+
+                    Write a complete story for a child aged {age_group} about "{topic}" using these facts:
                     {context}
-                    
+
+                    STORY STARTS BELOW:
                     The story must:
                     1. Start with an engaging opening and introduce the setting
-                    2. Present the topic through a simple adventure
-                    3. Show how the character learns about the topic
-                    4. End with a satisfying conclusion
+                    2. Use simple sentences (5-8 words) and basic vocabulary
+                    3. Include a character who learns something new
+                    4. Add one or two simple questions for the reader
+                    5. **Separate each paragraph with a blank line.**
+                    6. End with a satisfying conclusion and a clear lesson
+                    7. Make sure to complete the entire story before ending
                     
-                    Use clear, simple language and write exactly 4 paragraphs. Make sure to tie everything together at the end.
-                   
+                    Write exactly 4 paragraphs. Each paragraph should be 3-4 sentences.
+                    Use words that a {age_group}-year-old can understand.
+                    Include one "Did you know?" fact.
                     """
 
-                else:  # Upper Elementary
-                    prompt = f"""You are a children's storyteller. Write a story about "{topic}" using these facts:
+                else:  # Upper Elementary (10-12)
+                    prompt = f"""
+                    You are a friendly storyteller for young children.
+
+                    Write a complete story for a child aged {age_group} about "{topic}" using these facts:
                     {context}
-                    
+
+                    STORY STARTS BELOW:
                     The story must:
-                    1. Start with an interesting opening
+                    1. Start with an interesting opening that grabs attention
                     2. Set up the main character and their challenge
                     3. Present the topic through an engaging narrative
-                    4. Include key facts and explanations
-                    5. End with a satisfying conclusion
-                    
-                    Use age-appropriate vocabulary and write exactly 5 paragraphs.
-                    
-                    After the story, add a "Glossary" section with exactly 3 key terms from the story, formatted like this:
-                    Glossary:
-                    - Term 1: Simple definition
-                    - Term 2: Simple definition
-                    - Term 3: Simple definition
-                    
+                    4. Include clear explanations of complex concepts
+                    5. **Separate each paragraph with a blank line.**
+                    6. End with a satisfying conclusion and key takeaways
+                    7. Make sure to complete the entire story before ending
+
+                    Write exactly 5 paragraphs. Each paragraph should be 4-5 sentences.
+                    Separate each paragraph with a new line.
+                    Use age-appropriate vocabulary for {age_group}-year-olds.
                     """
 
-                logger.info("Created prompt for model")
+                logger.info("Created age-appropriate prompt for model")
             except Exception as e:
                 logger.error(f"Error creating prompt: {str(e)}")
                 raise
@@ -377,7 +535,7 @@ class KidsNewsGenerator:
             # Validate facts against news articles
             logger.info("Validating facts...")
             try:
-                validation_results = self.rag.validate_facts(cleaned_text)
+                validation_results = await self.rag.validate_facts(cleaned_text)
                 logger.info(f"Fact validation completed with score: {validation_results['overall_score']}")
             except Exception as e:
                 logger.error(f"Error during fact validation: {str(e)}")
@@ -418,141 +576,50 @@ class KidsNewsGenerator:
         if not text:
             return ""
         
-        # Split into lines and filter out prompt-related content
-        lines = text.split('\n')
-        cleaned_lines = []
+        # Find the story content after the delimiter
+        if "STORY STARTS BELOW:" in text:
+            text = text.split("STORY STARTS BELOW:")[1].strip()
         
-        # List of story starters to identify where the actual story begins
-        story_starters = [
-            "once upon a time",
-            "let me tell you a story about",
-            "here's a fun story about"
-        ]
+        # Remove any repeated dashes
+        text = re.sub(r'-{3,}', '', text)
         
-        # List of phrases that indicate prompt content to remove
-        prompt_phrases = [
-            # Role and context
-            'you are',
-            'children\'s storyteller',
-            'storyteller',
-            
-            # Story instructions
-            'write a story',
-            'write a complete story',
-            'write exactly',
-            'the story must',
-            'the story must:',
-            'story must:',
-            
-            # Content markers
-            'using these facts',
-            'using these facts:',
-            'use these facts',
-            'use these facts:',
-            'facts to include',
-            
-            # Language requirements
-            'use very simple words',
-            'use clear, simple language',
-            'use age-appropriate vocabulary',
-            'use simple vocabulary',
-            'use detailed but clear explanations',
-            
-            # Structure markers
-            'start with',
-            'end with',
-            'make sure to',
-            'include',
-            'present',
-            'show how',
-            'set up',
-            'explain',
-            'introduce',
-            
-            # Content elements
-            'friendly character',
-            'friendly characters',
-            'simple terms',
-            'simple adventure',
-            'engaging narrative',
-            'interesting opening',
-            'happy conclusion',
-            'happy ending',
-            'satisfying conclusion',
-            'proper conclusion',
-            'brief glossary',
-            'key terms',
-            'glossary of',
-            
-            # Formatting
-            'paragraphs',
-            'paragraph',
-            'exactly 3 paragraphs',
-            'exactly 4 paragraphs',
-            'exactly 5 paragraphs',
-            
-            # Common instruction words
-            'must',
-            'should',
-            'need to',
-            'have to',
-            'ensure',
-            'make sure',
-            'remember to',
-            'don\'t forget to'
-        ]
+        # Split into paragraphs and clean each one
+        paragraphs = text.split('\n\n')
+        cleaned_paragraphs = []
         
-        # Process each line
-        current_paragraph = []
-        story_started = False
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
-                # If we have content in current paragraph, add it to cleaned lines
-                if current_paragraph:
-                    cleaned_lines.append(' '.join(current_paragraph))
-                    current_paragraph = []
+        for paragraph in paragraphs:
+            # Skip empty paragraphs
+            if not paragraph.strip():
                 continue
             
-            lower_line = line.lower()
-            
-            # Check if this line starts the story
-            if not story_started and any(starter in lower_line for starter in story_starters):
-                story_started = True
-            
-            # Skip lines that are clearly part of the prompt or before the story starts
-            if not story_started:
+            # Skip paragraphs that are just instructions
+            if any(phrase in paragraph.lower() for phrase in [
+                'write', 'story', 'must', 'should', 'need to', 'have to',
+                'ensure', 'make sure', 'remember to', 'don\'t forget to',
+                'use', 'include', 'present', 'show', 'set up', 'explain',
+                'introduce', 'add', 'provide', 'follow', 'format', 'structure',
+                'guidelines', 'instructions', 'requirements', 'elements',
+                'content', 'markers', 'patterns', 'phrases', 'words',
+                'sentences', 'paragraphs', 'sections', 'parts', 'pieces',
+                'bits', 'chunks', 'blocks', 'segments', 'portions',
+                'fragments', 'snippets', 'excerpts', 'passages', 'texts',
+                'contents', 'materials', 'resources', 'sources', 'references',
+                'citations', 'quotes', 'facts', 'information', 'data',
+                'details', 'points', 'items', 'elements', 'components'
+            ]):
                 continue
-                
-            # Skip lines that match any prompt phrase
-            if any(phrase in lower_line for phrase in prompt_phrases):
-                continue
-                
-            # Skip lines that match numbered list pattern
-            if re.match(r'^\d+[\.\)]', line):
-                continue
             
-            # Add line to current paragraph
-            current_paragraph.append(line)
+            # Clean up the paragraph
+            paragraph = re.sub(r'\s+', ' ', paragraph).strip()
+            if paragraph:
+                cleaned_paragraphs.append(paragraph)
         
-        # Add any remaining paragraph
-        if current_paragraph:
-            cleaned_lines.append(' '.join(current_paragraph))
+        # Join paragraphs with double newlines
+        cleaned_text = '\n\n'.join(cleaned_paragraphs)
         
-        # If we have no content after cleaning, return the original text
-        if not cleaned_lines:
-            logger.warning("No content after cleaning, returning original text")
-            return text
-        
-        # Join paragraphs with double newlines for proper spacing
-        cleaned_text = '\n\n'.join(cleaned_lines)
-        
-        # Clean up any extra whitespace
-        cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
-        
-        # Ensure proper paragraph spacing
+        # Final cleanup
         cleaned_text = re.sub(r'\n\s*\n', '\n\n', cleaned_text)
+        cleaned_text = cleaned_text.strip()
         
         return cleaned_text
     

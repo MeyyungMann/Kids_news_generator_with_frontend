@@ -143,7 +143,8 @@ async def generate_article(request: GenerateRequest) -> Dict[str, Any]:
         
         # Generate kid-friendly version
         try:
-            result = generator.generate_news(
+            # Properly await the async generate_news function
+            result = await generator.generate_news(
                 topic=topic,
                 age_group=request.age_group
             )
@@ -678,6 +679,34 @@ async def get_feedback_history(
         
     except Exception as e:
         logger.error(f"Error retrieving feedback history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/articles/{category}/{filename}")
+async def delete_article(category: str, filename: str):
+    """Delete an article from the history."""
+    try:
+        # Construct the path to the article file
+        article_path = Path(__file__).parent.parent / "results" / "summaries" / category / filename
+        
+        # Check if file exists
+        if not article_path.exists():
+            raise HTTPException(status_code=404, detail="Article not found")
+        
+        # Delete the article file
+        article_path.unlink()
+        
+        # Also try to delete associated image if it exists
+        image_path = Path(__file__).parent.parent / "results" / "images" / category / f"{article_path.stem}.png"
+        if image_path.exists():
+            image_path.unlink()
+        
+        logger.info(f"Successfully deleted article: {filename}")
+        return {"message": "Article deleted successfully"}
+        
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Error deleting article: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
