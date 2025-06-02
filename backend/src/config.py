@@ -20,7 +20,7 @@ class Config:
     NEWS_API_KEY = os.getenv('NEWS_API_KEY')
     
     # Model Settings
-    MODEL_NAME = "gpt2"
+    MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2"
     MODEL_PATH = os.getenv('MODEL_PATH', '../models')
     
     # Server Settings

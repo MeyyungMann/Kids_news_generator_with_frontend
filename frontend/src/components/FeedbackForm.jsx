@@ -1,6 +1,71 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 
+// Tooltip component with different content based on type
+const RatingTooltip = ({ type }) => {
+  const [showTooltip, setShowTooltip] = useState(false);
+
+  const tooltipContent = {
+    age_appropriate: {
+      title: "Rating Scale",
+      ratings: [
+        "1 = Too difficult (not age-appropriate)",
+        "2 = Somewhat difficult",
+        "3 = Just right",
+        "4 = Somewhat easy",
+        "5 = Too easy"
+      ]
+    },
+    engagement: {
+      title: "Rating Scale",
+      ratings: [
+        "1 = Too difficult (not age-appropriate)",
+        "2 = Somewhat difficult",
+        "3 = Just right",
+        "4 = Somewhat easy",
+        "5 = Too easy"
+      ]
+    },
+    clarity: {
+      title: "Rating Scale",
+      ratings: [
+        "1 = Too difficult (not age-appropriate)",
+        "2 = Somewhat difficult",
+        "3 = Just right",
+        "4 = Somewhat easy",
+        "5 = Too easy"
+      ]
+    }
+  };
+
+  return (
+    <div className="relative inline-block ml-2">
+      <button
+        type="button"
+        onClick={() => setShowTooltip(!showTooltip)}
+        className="text-gray-500 hover:text-gray-700 focus:outline-none"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+        </svg>
+      </button>
+      
+      {showTooltip && (
+        <div className="absolute z-10 w-64 p-4 mt-2 bg-white rounded-lg shadow-lg border border-gray-200">
+          <div className="text-sm text-gray-700">
+            <h4 className="font-semibold mb-2">{tooltipContent[type].title}:</h4>
+            <ul className="space-y-1">
+              {tooltipContent[type].ratings.map((rating, index) => (
+                <li key={index}>{rating}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const FeedbackForm = ({ articleId, ageGroup, category }) => {
   const [feedback, setFeedback] = useState({
     age_appropriate: 3,
@@ -25,32 +90,31 @@ const FeedbackForm = ({ articleId, ageGroup, category }) => {
     setError(null);
 
     try {
-      // Submit all feedback types at once
-      await axios.post('/api/feedback', {
-        article_id: articleId,
-        age_group: ageGroup,
-        category: category,
-        feedback_type: 'age_appropriate',
-        rating: feedback.age_appropriate,
-        comments: feedback.age_appropriate_comments
-      });
+      // Convert age_group to integer if it's a string
+      const ageGroupInt = typeof ageGroup === 'string' ? parseInt(ageGroup.split('-')[0]) : ageGroup;
 
-      await axios.post('/api/feedback', {
+      // Submit all feedback types in a single request with full backend URL
+      await axios.post('http://localhost:8000/api/feedback', {
         article_id: articleId,
-        age_group: ageGroup,
+        age_group: ageGroupInt,
         category: category,
-        feedback_type: 'engagement',
-        rating: feedback.engagement,
-        comments: feedback.engagement_comments
-      });
-
-      await axios.post('/api/feedback', {
-        article_id: articleId,
-        age_group: ageGroup,
-        category: category,
-        feedback_type: 'clarity',
-        rating: feedback.clarity,
-        comments: feedback.clarity_comments
+        feedback: [
+          {
+            feedback_type: 'age_appropriate',
+            rating: feedback.age_appropriate,
+            comments: feedback.age_appropriate_comments || undefined
+          },
+          {
+            feedback_type: 'engagement',
+            rating: feedback.engagement,
+            comments: feedback.engagement_comments || undefined
+          },
+          {
+            feedback_type: 'clarity',
+            rating: feedback.clarity,
+            comments: feedback.clarity_comments || undefined
+          }
+        ]
       });
 
       setSubmitted(true);
@@ -80,8 +144,9 @@ const FeedbackForm = ({ articleId, ageGroup, category }) => {
         )}
 
         <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">
+          <label className="block text-sm font-medium text-gray-700 flex items-center">
             Age Appropriateness
+            <RatingTooltip type="age_appropriate" />
           </label>
           <div className="flex space-x-2">
             {[1, 2, 3, 4, 5].map((rating) => (
@@ -109,8 +174,9 @@ const FeedbackForm = ({ articleId, ageGroup, category }) => {
         </div>
 
         <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">
+          <label className="block text-sm font-medium text-gray-700 flex items-center">
             Engagement Level
+            <RatingTooltip type="engagement" />
           </label>
           <div className="flex space-x-2">
             {[1, 2, 3, 4, 5].map((rating) => (
@@ -138,8 +204,9 @@ const FeedbackForm = ({ articleId, ageGroup, category }) => {
         </div>
 
         <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">
+          <label className="block text-sm font-medium text-gray-700 flex items-center">
             Clarity
+            <RatingTooltip type="clarity" />
           </label>
           <div className="flex space-x-2">
             {[1, 2, 3, 4, 5].map((rating) => (

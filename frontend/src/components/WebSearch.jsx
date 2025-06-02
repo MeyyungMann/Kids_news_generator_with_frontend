@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+import FeedbackForm from './FeedbackForm';
 
 const WebSearch = ({ onGenerateArticle }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -7,6 +8,7 @@ const WebSearch = ({ onGenerateArticle }) => {
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState('');
   const [selectedAgeGroup, setSelectedAgeGroup] = useState('7-9'); // Default age group
+  const [generatedArticle, setGeneratedArticle] = useState(null);
 
   const ageGroups = [
     { value: '3-6', label: 'Ages 3-6 (Preschool)' },
@@ -27,6 +29,16 @@ const WebSearch = ({ onGenerateArticle }) => {
       console.error('Error:', err);
     } finally {
       setIsSearching(false);
+    }
+  };
+
+  const handleGenerateArticle = async (article) => {
+    try {
+      const generated = await onGenerateArticle({ ...article, ageGroup: selectedAgeGroup });
+      setGeneratedArticle(generated);
+    } catch (err) {
+      setError('Failed to generate article. Please try again.');
+      console.error('Error:', err);
     }
   };
 
@@ -116,7 +128,7 @@ const WebSearch = ({ onGenerateArticle }) => {
                 </div>
                 <div className="mt-4 flex space-x-4">
                   <button
-                    onClick={() => onGenerateArticle({ ...article, ageGroup: selectedAgeGroup })}
+                    onClick={() => handleGenerateArticle(article)}
                     className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-primary-700 bg-primary-100 hover:bg-primary-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
                   >
                     Generate Kid-Friendly Version
@@ -125,6 +137,37 @@ const WebSearch = ({ onGenerateArticle }) => {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {generatedArticle && (
+        <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+          <div className="px-4 py-5 sm:p-6">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">Generated Kid-Friendly Article</h3>
+            {generatedArticle.image_url && (
+              <img
+                src={`http://localhost:8000${generatedArticle.image_url}`}
+                alt={generatedArticle.title}
+                className="mt-4 rounded-lg shadow-md w-full max-w-2xl mx-auto"
+                onError={(e) => {
+                  e.target.onerror = null;
+                  e.target.src = 'path/to/fallback/image.png';
+                }}
+              />
+            )}
+            <div className="prose max-w-none">
+              {generatedArticle.content.split('\n').map((paragraph, i) => (
+                <p key={i} className="mb-4">{paragraph}</p>
+              ))}
+            </div>
+            <div className="mt-6 border-t pt-6">
+              <FeedbackForm
+                articleId={generatedArticle.id || generatedArticle.topic?.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now()}
+                ageGroup={parseInt(selectedAgeGroup.split('-')[0])}
+                category={generatedArticle.category || 'General'}
+              />
+            </div>
+          </div>
         </div>
       )}
     </div>

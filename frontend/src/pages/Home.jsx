@@ -52,6 +52,19 @@ export const Home = () => {
     }
   };
 
+  const formatDate = (dateString) => {
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return 'Date not available';
+      }
+      return date.toLocaleDateString();
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return 'Date not available';
+    }
+  };
+
   useEffect(() => {
     if (category) {
       fetchNews(category);
@@ -99,7 +112,7 @@ export const Home = () => {
               <div className="p-6">
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">{article.title}</h2>
                 <p className="text-sm text-gray-500 mb-4">
-                  Source: {article.source} • {new Date(article.published_at).toLocaleDateString()}
+                  Source: {article.source} • {formatDate(article.published_at)}
                 </p>
                 <div className="prose max-w-none">
                   {article.content.split('\n').map((paragraph, i) => (

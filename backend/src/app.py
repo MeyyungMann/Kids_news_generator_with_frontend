@@ -32,7 +32,7 @@ app = FastAPI(title="Kids News Generator API")
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -93,8 +93,15 @@ async def startup_event():
         logger.error(f"Error during startup: {str(e)}")
         raise
 
-# Keep only the valid categories list
+# Define valid categories
 CATEGORIES = ["Science", "Technology", "Health", "Environment", "Economy"]
+
+def normalize_category(category: str) -> str:
+    """Normalize category name to match backend expectations."""
+    if category.lower() == "all":
+        return "all"
+    # Capitalize first letter of each word
+    return " ".join(word.capitalize() for word in category.split())
 
 class GenerateRequest(BaseModel):
     topic: str
@@ -116,19 +123,23 @@ async def generate_article(request: GenerateRequest) -> Dict[str, Any]:
     try:
         logger.info(f"Generating article for topic: {request.topic}, age_group: {request.age_group}")
         
+        # Normalize category
+        normalized_category = normalize_category(request.category)
+        logger.info(f"Normalized category: {normalized_category}")
+        
         # Load articles into RAG system before generation
         logger.info("Loading articles into RAG system...")
         generator.rag.load_news_articles()
         
         # First, fetch a real news article
         articles = await news_handler.fetch_articles(
-            category=request.category,
+            category=normalized_category,
             days=1,
             max_articles=1
         )
         
         if not articles:
-            logger.warning(f"No articles found for category: {request.category}")
+            logger.warning(f"No articles found for category: {normalized_category}")
             # Use the topic directly if no articles found
             topic = request.topic
             original_article = {
@@ -165,12 +176,12 @@ async def generate_article(request: GenerateRequest) -> Dict[str, Any]:
                     content={
                         "topic": topic,
                         "text": result["text"],
-                        "category": request.category,
+                        "category": normalized_category,
                         "timestamp": result["timestamp"]
                     },
                     age_group=request.age_group
                 )
-                image_url = f"/images/{request.category}/{Path(image_result['image_path']).name}"
+                image_url = f"/images/{normalized_category}/{Path(image_result['image_path']).name}"
                 clip_similarity_score = image_result['metadata'].get('clip_similarity_score')
             except Exception as e:
                 logger.error(f"Error generating image: {str(e)}")
@@ -179,7 +190,7 @@ async def generate_article(request: GenerateRequest) -> Dict[str, Any]:
         # Create a summary object
         summary_data = {
             "title": topic,
-            "category": request.category,
+            "category": normalized_category,
             "content": result["text"],
             "timestamp": result["timestamp"],
             "age_group": request.age_group,
@@ -198,7 +209,7 @@ async def generate_article(request: GenerateRequest) -> Dict[str, Any]:
         response = {
             "title": topic,
             "content": result["text"],
-            "category": request.category,
+            "category": normalized_category,
             "reading_level": f"Ages {request.age_group}-{request.age_group + 3}",
             "safety_score": result.get("safety_score", 0.0),
             "image_url": image_url,
@@ -226,13 +237,17 @@ async def get_news(category: str) -> Dict[str, Any]:
     logger.info(f"Received request for category: {category}")
     
     try:
+        # Normalize category
+        normalized_category = normalize_category(category)
+        logger.info(f"Normalized category: {normalized_category}")
+        
         # Validate category
-        if category not in CATEGORIES:
+        if normalized_category not in CATEGORIES and normalized_category != "all":
             return {"articles": []}  # Return empty list for invalid category
         
         # Fetch articles using NewsAPIHandler
         articles = await news_handler.fetch_articles(
-            category=category,
+            category=normalized_category,
             days=1,
             max_articles=5
         )
@@ -250,7 +265,7 @@ async def get_news(category: str) -> Dict[str, Any]:
                     "url": article.get("url", ""),
                     "published_at": article.get("published_at", ""),
                     "content": article.get("content", ""),
-                    "category": category,
+                    "category": normalized_category,
                     "description": article.get("description", ""),
                     "image_url": article.get("urlToImage", None)
                 }
@@ -262,7 +277,7 @@ async def get_news(category: str) -> Dict[str, Any]:
         return {"articles": processed_articles}
         
     except Exception as e:
-        logger.error(f"Error fetching news for category {category}: {str(e)}")
+        logger.error(f"Error fetching news for category {normalized_category}: {str(e)}")
         return {"articles": []}  # Return empty list instead of raising error
 
 @app.get("/api/news/{category}/full/{article_id}")
@@ -316,6 +331,10 @@ async def get_article_history(category: str = "all", age_group: str = "all") -> 
     try:
         logger.info(f"Fetching article history for category: {category}, age_group: {age_group}")
         
+        # Normalize category
+        normalized_category = normalize_category(category)
+        logger.info(f"Normalized category: {normalized_category}")
+        
         # Get the summaries directory
         summaries_dir = Path(__file__).parent.parent / "results" / "summaries"
         feedback_dir = Path(__file__).parent.parent / "data" / "feedback"
@@ -324,10 +343,10 @@ async def get_article_history(category: str = "all", age_group: str = "all") -> 
         articles = []
         
         # If category is "all", search in all category directories
-        if category.lower() == "all":
-            categories = ["Science", "Technology", "Environment", "Health", "Economy"]
+        if normalized_category.lower() == "all":
+            categories = CATEGORIES
         else:
-            categories = [category]
+            categories = [normalized_category]
         
         # Search for summary files in each category directory
         for cat in categories:
@@ -372,7 +391,7 @@ async def get_article_history(category: str = "all", age_group: str = "all") -> 
                             "text": summary_data.get("text", summary_data.get("prompt", "")),  # Try both text and prompt
                             "timestamp": summary_data.get("timestamp", ""),
                             "image_url": image_path,
-                            "age_group": f"{summary_data.get('age_group', 7)}-{summary_data.get('age_group', 7) + 3}",
+                            "age_group": f"{summary_data.get('age_group', 7)}-{min(summary_data.get('age_group', 7) + 2, 12)}",
                             "combined_score": summary_data.get("safety_score", 0.0),
                             "original_article": summary_data.get("original_article", {}),
                             "feedback": feedback_data if feedback_data else None,
@@ -626,7 +645,11 @@ async def submit_feedback(request: FeedbackRequest) -> Dict[str, Any]:
             json.dump(feedback_data, f, indent=2)
         
         # Update the generator with feedback
-        generator.update_with_feedback(feedback_data)
+        try:
+            generator.update_with_feedback(feedback_data)
+        except Exception as e:
+            logger.error(f"Error updating generator with feedback: {str(e)}")
+            # Continue even if generator update fails
         
         return {"message": "Feedback submitted successfully", "feedback_id": feedback_file.stem}
         
@@ -643,18 +666,21 @@ async def get_feedback_history(
     """Get feedback history with optional filters."""
     try:
         feedback_dir = Path(__file__).parent.parent / "data" / "feedback"
-        if not feedback_dir.exists():
-            return {"feedback": []}
-
+        
+        # Create feedback directory if it doesn't exist
+        feedback_dir.mkdir(parents=True, exist_ok=True)
+        
         all_feedback = []
         
         # Get all category directories
-        category_dirs = [feedback_dir / cat for cat in os.listdir(feedback_dir) 
-                        if (feedback_dir / cat).is_dir()]
-        
-        # If category is specified, only look in that category
+        category_dirs = []
         if category:
-            category_dirs = [feedback_dir / category]
+            category_dir = feedback_dir / category
+            if category_dir.exists():
+                category_dirs = [category_dir]
+        else:
+            category_dirs = [feedback_dir / cat for cat in os.listdir(feedback_dir) 
+                           if (feedback_dir / cat).is_dir()]
         
         # Process each category directory
         for cat_dir in category_dirs:
@@ -691,7 +717,14 @@ async def get_feedback_history(
         
     except Exception as e:
         logger.error(f"Error retrieving feedback history: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return empty feedback list instead of raising error
+        return {
+            "feedback": [],
+            "total_count": 0,
+            "categories": [],
+            "age_groups": [],
+            "feedback_types": []
+        }
 
 @app.delete("/api/articles/{category}/{filename}")
 async def delete_article(category: str, filename: str):

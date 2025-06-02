@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import FeedbackForm from './FeedbackForm';
 
 const ArticleHistory = () => {
     const [articles, setArticles] = useState([]);
@@ -11,6 +12,7 @@ const ArticleHistory = () => {
     const [showPrompts, setShowPrompts] = useState({});  // Track which articles show prompts
     const [deleteLoading, setDeleteLoading] = useState({});  // Track which articles are being deleted
     const [favoriteLoading, setFavoriteLoading] = useState({});  // Track which articles are being favorited
+    const [showFeedback, setShowFeedback] = useState({});  // Track which articles show feedback
 
     const categories = [
         { id: 'all', name: 'All Categories' },
@@ -36,7 +38,7 @@ const ArticleHistory = () => {
         try {
             setLoading(true);
             setError(null);
-            const response = await axios.get(`/api/articles/history?category=${selectedCategory}&age_group=${selectedAgeGroup}`);
+            const response = await axios.get(`http://localhost:8000/api/articles/history?category=${selectedCategory}&age_group=${selectedAgeGroup}`);
             let articlesData = response.data.articles || [];
             
             // Filter favorites if showFavoritesOnly is true
@@ -49,10 +51,10 @@ const ArticleHistory = () => {
             
             setArticles(articlesData);
             
-            // Initialize showPrompts state for new articles
+            // Initialize showPrompts state as true for all articles
             const newShowPrompts = {};
             articlesData.forEach((_, index) => {
-                newShowPrompts[index] = false;
+                newShowPrompts[index] = true;  // Set to true by default
             });
             setShowPrompts(newShowPrompts);
         } catch (err) {
@@ -67,6 +69,13 @@ const ArticleHistory = () => {
 
     const togglePrompts = (index) => {
         setShowPrompts(prev => ({
+            ...prev,
+            [index]: !prev[index]
+        }));
+    };
+
+    const toggleFeedback = (index) => {
+        setShowFeedback(prev => ({
             ...prev,
             [index]: !prev[index]
         }));
@@ -108,8 +117,8 @@ const ArticleHistory = () => {
             // Extract filename from the article data
             const filename = `${article.topic.replace(/[^a-zA-Z0-9]/g, '_')}_${article.timestamp}.json`;
             
-            // Call the toggle favorite endpoint
-            const response = await axios.post(`/api/articles/${category}/${filename}/favorite`);
+            // Call the toggle favorite endpoint with full URL
+            const response = await axios.post(`http://localhost:8000/api/articles/${category}/${filename}/favorite`);
             const newFavoriteStatus = response.data.is_favorite;
             
             // Update the article's favorite status in the state
@@ -155,8 +164,8 @@ const ArticleHistory = () => {
             // Extract filename from the article data
             const filename = `${article.topic.replace(/[^a-zA-Z0-9]/g, '_')}_${article.timestamp}.json`;
             
-            // Call the delete endpoint
-            await axios.delete(`/api/articles/${category}/${filename}`);
+            // Call the delete endpoint with full URL
+            await axios.delete(`http://localhost:8000/api/articles/${category}/${filename}`);
             
             // Remove the article from the state
             setArticles(prev => prev.filter((_, i) => i !== index));
@@ -169,6 +178,65 @@ const ArticleHistory = () => {
         } finally {
             setDeleteLoading(prev => ({ ...prev, [index]: false }));
         }
+    };
+
+    const formatDate = (dateString) => {
+        if (!dateString) {
+            console.log('No date string provided');
+            return 'Date not available';
+        }
+
+        try {
+            // Handle different date formats
+            let date;
+            if (typeof dateString === 'string') {
+                // Try parsing different date formats
+                if (dateString.includes('T')) {
+                    // ISO format
+                    date = new Date(dateString);
+                } else if (dateString.includes('_')) {
+                    // Custom format YYYYMMDD_HHMMSS
+                    const [datePart, timePart] = dateString.split('_');
+                    const year = datePart.substring(0, 4);
+                    const month = datePart.substring(4, 6);
+                    const day = datePart.substring(6, 8);
+                    const hour = timePart.substring(0, 2);
+                    const minute = timePart.substring(2, 4);
+                    const second = timePart.substring(4, 6);
+                    date = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}`);
+                } else {
+                    // Try standard date parsing
+                    date = new Date(dateString);
+                }
+            } else if (dateString instanceof Date) {
+                date = dateString;
+            } else {
+                console.log('Invalid date format:', dateString);
+                return 'Date not available';
+            }
+
+            if (isNaN(date.getTime())) {
+                console.log('Invalid date value:', dateString);
+                return 'Date not available';
+            }
+
+            // Format the date with more details
+            return date.toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        } catch (error) {
+            console.error('Error formatting date:', error, 'Date string:', dateString);
+            return 'Date not available';
+        }
+    };
+
+    const getImageUrl = (imagePath) => {
+        if (!imagePath) return null;
+        return `http://localhost:8000${imagePath}`;
     };
 
     return (
@@ -257,7 +325,7 @@ const ArticleHistory = () => {
                                     onClick={() => togglePrompts(index)}
                                     className="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-full transition-colors"
                                 >
-                                    {showPrompts[index] ? 'Hide Prompts' : 'Show Prompts'}
+                                    {showPrompts[index] ? 'Hide Original' : 'Show Original'}
                                 </button>
                                 <button
                                     onClick={() => handleDelete(article, index)}
@@ -271,35 +339,32 @@ const ArticleHistory = () => {
                                     {deleteLoading[index] ? 'Deleting...' : 'Delete'}
                                 </button>
                                 <span className="text-sm text-gray-500">
-                                    {new Date(article.timestamp).toLocaleDateString()}
+                                    {formatDate(article.timestamp)}
                                 </span>
                             </div>
                         </div>
 
                         {article.image_url && (
-                            <div className="relative mb-6">
-                                <img
-                                    src={article.image_url}
+                            <div className="mt-4 flex justify-center">
+                                <img 
+                                    src={getImageUrl(article.image_url)} 
                                     alt={article.topic}
-                                    className="w-full h-96 object-contain rounded-lg shadow-lg hover:scale-105 transition-transform duration-300"
+                                    className="w-96 h-96 object-cover rounded-lg shadow-lg"
+                                    onError={(e) => {
+                                        e.target.onerror = null;
+                                        e.target.src = 'path/to/fallback/image.png';
+                                    }}
                                 />
-                                {article.clip_similarity_score && (
-                                    <div className="absolute top-2 right-2 bg-white bg-opacity-90 px-3 py-1 rounded-full shadow-md">
-                                        <span className="text-sm font-medium text-gray-700">
-                                            Image Relevance: {article.clip_similarity_score.toFixed(1)}%
-                                        </span>
-                                    </div>
-                                )}
                             </div>
                         )}
                         
                         {showPrompts[index] ? (
                             <div className="mb-4 p-4 bg-gray-50 rounded-lg">
-                                <p className="text-gray-600 whitespace-pre-wrap">{article.text}</p>
+                                <p className="text-gray-600 whitespace-pre-wrap">{article.text || article.content}</p>
                             </div>
                         ) : (
                             <div className="mb-4">
-                                <p className="text-gray-600">{cleanText(article.text)}</p>
+                                <p className="text-gray-600">{cleanText(article.text || article.content)}</p>
                             </div>
                         )}
                         
@@ -307,7 +372,7 @@ const ArticleHistory = () => {
                             <div className="mt-4 pt-4 border-t border-gray-200">
                                 <div className="flex flex-col space-y-2">
                                     <p className="text-sm text-gray-500">
-                                        Source: {article.original_article.original_article?.source} • {new Date(article.original_article.original_article?.published_at).toLocaleDateString()}
+                                        Source: {article.original_article.original_article?.source} • {formatDate(article.original_article.original_article?.published_at)}
                                     </p>
                                     {article.original_article.original_article?.url && (
                                         <a
@@ -330,6 +395,26 @@ const ArticleHistory = () => {
                             <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm">
                                 Score: {article.combined_score?.toFixed(2)}
                             </span>
+                        </div>
+
+                        <div className="mt-6 border-t pt-6">
+                            <button
+                                onClick={() => toggleFeedback(index)}
+                                className="w-full py-3 px-4 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition-colors duration-200 flex items-center justify-center gap-2"
+                            >
+                                <span className="text-lg">{showFeedback[index] ? '▼' : '▲'}</span>
+                                <span className="font-medium">{showFeedback[index] ? 'Hide Feedback Form' : 'Show Feedback Form'}</span>
+                            </button>
+                            
+                            {showFeedback[index] && (
+                                <div className="mt-4">
+                                    <FeedbackForm
+                                        articleId={article.topic.replace(/[^a-zA-Z0-9]/g, '_') + '_' + article.timestamp}
+                                        ageGroup={article.age_group}
+                                        category={article.original_article?.category || article.original_article?.original_article?.category}
+                                    />
+                                </div>
+                            )}
                         </div>
                     </div>
                 ))}

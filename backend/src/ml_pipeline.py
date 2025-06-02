@@ -224,6 +224,9 @@ class KidsNewsGenerator:
         }
         
         try:
+            # Create feedback directory if it doesn't exist
+            self.feedback_dir.mkdir(parents=True, exist_ok=True)
+            
             # Load feedback from all category directories
             for category_dir in self.feedback_dir.glob("*"):
                 if not category_dir.is_dir():
@@ -442,7 +445,7 @@ class KidsNewsGenerator:
                     Write **exactly 3 paragraphs**. Each paragraph should have **2–3 sentences**.  
                     Use only words that a {age_group}-year-old can understand.
 
-                    ### START OF STORY ###
+                    START OF STORY
                     """
 
 
@@ -466,7 +469,7 @@ class KidsNewsGenerator:
                     Write exactly 4 paragraphs. Each paragraph should be 3–4 sentences.  
                     Use words that a {age_group}-year-old can understand.
 
-                    ### START OF STORY ###
+                    START OF STORY
                     """
 
                 else:  # Upper Elementary (10-12)
@@ -485,10 +488,18 @@ class KidsNewsGenerator:
                     6. End with a satisfying conclusion and key takeaways  
                     7. Make sure to complete the entire story before ending  
 
-                    Write exactly 5 paragraphs. Each paragraph should be 4-5 sentences.  
-                    Use age-appropriate vocabulary for {age_group}-year-olds.
+                    Format Requirements:
+                    - Write exactly 5 paragraphs
+                    - Each paragraph should be 4-5 sentences
+                    - Use age-appropriate vocabulary for {age_group}-year-olds
+                    - Do not include "Key Takeaways" or numbered lists in the story
+                    - Keep the story narrative focused and flowing
+                    - Use proper paragraph spacing
+                    - Do not include any meta-commentary or instructions
+                    - Each paragraph should be separated by a blank line
+                    - The story must have exactly 5 paragraphs, no more and no less
 
-                    ### START OF STORY ###
+                    START OF STORY
                     """
 
                 logger.info("Created age-appropriate prompt for model")
@@ -585,8 +596,8 @@ class KidsNewsGenerator:
             return ""
         
         # Find the story content after the delimiter
-        if "STORY STARTS BELOW:" in text:
-            text = text.split("STORY STARTS BELOW:")[1].strip()
+        if "START OF STORY" in text:
+            text = text.split("START OF STORY")[1].strip()
         
         # Remove any repeated dashes
         text = re.sub(r'-{3,}', '', text)
@@ -755,7 +766,11 @@ class KidsNewsGenerator:
         """Update the system with new feedback."""
         try:
             # Update RL system
-            self.rl_system.update_with_feedback(feedback_data)
+            try:
+                self.rl_system.update_with_feedback(feedback_data)
+            except Exception as e:
+                logger.error(f"Error updating RL system with feedback: {str(e)}")
+                # Continue even if RL update fails
             
             # Save feedback
             category = feedback_data.get("category", "general").capitalize()
@@ -770,4 +785,4 @@ class KidsNewsGenerator:
             
         except Exception as e:
             logger.error(f"Error updating with feedback: {str(e)}")
-            raise 
+            # Don't raise the error, just log it 

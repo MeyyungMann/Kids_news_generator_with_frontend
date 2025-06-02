@@ -35,6 +35,19 @@ function App() {
     return min;
   };
 
+  const formatDate = (dateString) => {
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return 'Date not available';
+      }
+      return date.toLocaleDateString();
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return 'Date not available';
+    }
+  };
+
   const fetchRealNews = async () => {
     if (!selectedCategory) {
       setError('Please select a category first');
@@ -46,14 +59,14 @@ function App() {
     setRealNews(null);
 
     try {
-      const response = await axios.get(`/api/news/${selectedCategory}`);
+      const response = await axios.get(`http://localhost:8000/api/news/${selectedCategory}`);
       if (response.data.articles && response.data.articles.length > 0) {
         const article = response.data.articles[0];
         
         // Only try to get full content if we have a valid article ID
         if (article.id) {
           try {
-            const fullContentResponse = await axios.get(`/api/news/${selectedCategory}/full/${article.id}`);
+            const fullContentResponse = await axios.get(`http://localhost:8000/api/news/${selectedCategory}/full/${article.id}`);
             if (fullContentResponse.data && fullContentResponse.data.content) {
               article.content = fullContentResponse.data.content;
             }
@@ -103,7 +116,7 @@ function App() {
       }
 
       // Generate kid-friendly content
-      const response = await axios.post('/api/generate', requestPayload);
+      const response = await axios.post('http://localhost:8000/api/generate', requestPayload);
       setArticle(response.data);
     } catch (err) {
       setError('Failed to generate article. Please try again.');
@@ -127,11 +140,11 @@ function App() {
         return;
       }
       
-      const response = await axios.post('/api/generate-from-url', {
-        url: articleUrl,  // Use the properly formatted URL
+      const response = await axios.post('http://localhost:8000/api/generate-from-url', {
+        url: articleUrl,
         title: article.title,
         source: article.source,
-        age_group: getAgeGroupNumber(article.ageGroup),  // Use age group from WebSearch
+        age_group: getAgeGroupNumber(article.ageGroup),
         generate_image: true
       });
       
@@ -280,7 +293,7 @@ function App() {
                             <div className="px-4 py-5 sm:px-6">
                               <h3 className="text-lg leading-6 font-medium text-gray-900">Original News</h3>
                               <p className="mt-1 max-w-2xl text-sm text-gray-500">
-                                Source: {realNews.source} | Published: {new Date(realNews.published_at).toLocaleDateString()}
+                                Source: {realNews.source} | Published: {formatDate(realNews.published_at)}
                               </p>
                             </div>
                             <div className="border-t border-gray-200">
@@ -314,7 +327,7 @@ function App() {
                             </div>
                             {article.image_url && (
                               <img
-                                src={article.image_url}
+                                src={`http://localhost:8000${article.image_url}`}
                                 alt={article.title}
                                 className="mt-4 rounded-lg shadow-md"
                               />
@@ -323,7 +336,7 @@ function App() {
                               <div className="mt-6 border-t pt-6">
                                 <div className="flex flex-col space-y-2">
                                   <p className="text-sm text-gray-500">
-                                    Source: {article.original_article.source} • {new Date(article.original_article.published_at).toLocaleDateString()}
+                                    Source: {article.original_article.source} • {formatDate(article.original_article.published_at)}
                                   </p>
                                   {article.original_article.url && (
                                     <a
@@ -340,7 +353,7 @@ function App() {
                             )}
                             <div className="mt-6 border-t pt-6">
                               <FeedbackForm
-                                articleId={article.id || Date.now().toString()}
+                                articleId={article.id || article.topic?.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now()}
                                 ageGroup={getAgeGroupNumber(selectedAgeGroup)}
                                 category={selectedCategory}
                               />
