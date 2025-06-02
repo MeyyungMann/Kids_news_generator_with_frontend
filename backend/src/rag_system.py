@@ -15,13 +15,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class RAGSystem:
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2", max_documents: int = 1000):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2", max_documents: int = 1000, skip_article_loading: bool = False):
         """Initialize the RAG system with FAISS index and sentence transformer."""
         self.model = SentenceTransformer(model_name)
         self.index = None
         self.documents = []
         self.document_metadata = []
         self.max_documents = max_documents
+        self.skip_article_loading = skip_article_loading
         
         # Create directory for storing the index
         self.index_dir = Path(__file__).parent.parent / "data" / "rag_index"
@@ -32,7 +33,11 @@ class RAGSystem:
         
         # Add news article handling
         self.news_documents_dir = Path(__file__).parent.parent / "data" / "rag_documents"
-    
+        
+        # Only load articles if not skipped
+        if not self.skip_article_loading:
+            self.load_news_articles()
+        
     def _load_or_create_index(self):
         """Load existing FAISS index or create a new one."""
         index_path = self.index_dir / "faiss_index.bin"
@@ -200,6 +205,10 @@ class RAGSystem:
     
     def load_news_articles(self):
         """Load news articles from the RAG documents directory."""
+        if self.skip_article_loading:
+            logger.info("Article loading is disabled")
+            return
+            
         try:
             if not self.news_documents_dir.exists():
                 logger.warning("No news articles directory found")
@@ -214,7 +223,15 @@ class RAGSystem:
                 if category_dir.is_dir():
                     logger.info(f"Loading articles from category: {category_dir.name}")
                     
-                    for article_file in category_dir.glob("*.json"):
+                    # Get all article files and sort by modification time (newest first)
+                    article_files = sorted(
+                        category_dir.glob("*.json"),
+                        key=lambda x: x.stat().st_mtime,
+                        reverse=True
+                    )
+                    
+                    # Take only the 3 most recent articles
+                    for article_file in article_files[:3]:
                         try:
                             with open(article_file, 'r', encoding='utf-8') as f:
                                 article = json.load(f)

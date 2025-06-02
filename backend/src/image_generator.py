@@ -52,48 +52,38 @@ class KidFriendlyImageGenerator:
         if not self._initialize_environment():
             raise RuntimeError("Failed to initialize environment")
         
-        # Initialize the pipeline
-        self._init_pipeline()
-        
-        # Use provided CLIP handler or create a new one
+        # Initialize CLIP handler first
         self.clip_handler = clip_handler or CLIPHandler()
+        
+        # Initialize the pipeline after CLIP handler is ready
+        self._init_pipeline()
     
     def _init_pipeline(self):
         """Initialize the Stable Diffusion pipeline."""
         try:
-            logger.info(f"Loading Stable Diffusion model: {self.model_id}")
+            logger.info(f"Initializing Stable Diffusion pipeline with model: {self.model_id}")
             
-            # Calculate available GPU memory
-            if torch.cuda.is_available():
-                gpu_memory = torch.cuda.get_device_properties(0).total_memory
-                # Reserve 10% for buffers
-                max_memory = {0: int(gpu_memory * 0.9)}
-            else:
-                max_memory = None
-            
-            # Load model with memory optimization
+            # Initialize the pipeline without safety checker
             self.pipeline = StableDiffusionPipeline.from_pretrained(
                 self.model_id,
-                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                safety_checker=None,  # Disable safety checker for kid-friendly content
-                use_safetensors=True,  # Use safetensors for better compatibility
-                variant="fp16" if self.device == "cuda" else None,  # Use fp16 variant for GPU
-                low_cpu_mem_usage=True
+                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                safety_checker=None,  # Disable safety checker
+                requires_safety_checker=False  # Explicitly disable safety checking
             )
             
-            # Move pipeline to device
-            self.pipeline = self.pipeline.to(self.device)
+            # Move to GPU if available
+            if torch.cuda.is_available():
+                self.pipeline = self.pipeline.to("cuda")
+                logger.info("Pipeline moved to CUDA device")
             
             # Enable memory optimization
-            if self.device == "cuda":
-                self.pipeline.enable_attention_slicing()
-                self.pipeline.enable_vae_slicing()
-                if max_memory:
-                    self.pipeline.enable_model_cpu_offload()
+            self.pipeline.enable_attention_slicing()
+            self.pipeline.enable_vae_slicing()
             
-            logger.info("Stable Diffusion model loaded successfully")
+            logger.info("Stable Diffusion pipeline initialized successfully")
+            
         except Exception as e:
-            logger.error(f"Error loading Stable Diffusion model: {str(e)}")
+            logger.error(f"Error initializing Stable Diffusion pipeline: {str(e)}")
             raise
     
     def _create_clip_prompt(self, content: Dict[str, Any], age_group: int) -> str:

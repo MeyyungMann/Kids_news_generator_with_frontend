@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 import json
 import torch
@@ -20,11 +20,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class KidsNewsGenerator:
-    def __init__(self, offline_mode: bool = False):
+    def __init__(self, offline_mode: bool = False, skip_article_loading: bool = False):
         """Initialize the news generator."""
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model_name = Config.MODEL_NAME
         self.offline_mode = offline_mode
+        self.articles_loaded = False
         
         # Set up directories using config
         self.base_dir = Config.RESULTS_DIR
@@ -47,11 +48,14 @@ class KidsNewsGenerator:
         
         # Initialize RAG system with proper error handling
         try:
-            self.rag = RAGSystem()
-            # Load articles immediately during initialization
-            self.rag.load_news_articles()
-            self.articles_loaded = True
-            logger.info("RAG system initialized and articles loaded successfully")
+            self.rag = RAGSystem(skip_article_loading=skip_article_loading)
+            # Load articles immediately during initialization if not skipped
+            if not skip_article_loading:
+                self.rag.load_news_articles()
+                self.articles_loaded = True
+                logger.info("RAG system initialized and articles loaded successfully")
+            else:
+                logger.info("RAG system initialized without loading articles")
         except Exception as e:
             logger.error(f"Error initializing RAG system: {str(e)}")
             self.rag = None
@@ -159,14 +163,14 @@ class KidsNewsGenerator:
             logger.error(f"Error getting system diagnostics: {str(e)}")
             return {}
     
-    def ensure_articles_loaded(self):
+    async def ensure_articles_loaded(self):
         """Ensure articles are loaded into the RAG system."""
         if not self.articles_loaded:
             try:
                 logger.info("Loading articles into RAG system...")
                 if self.rag is None:
                     self.rag = RAGSystem()
-                self.rag.load_news_articles()
+                await self.rag.load_news_articles()
                 self.articles_loaded = True
                 logger.info("Articles loaded successfully")
             except Exception as e:
@@ -280,6 +284,14 @@ class KidsNewsGenerator:
         try:
             logger.info(f"Starting news generation for topic: {topic}, age_group: {age_group}")
             
+            # Ensure RAG system is initialized
+            if self.rag is None:
+                logger.error("RAG system not initialized")
+                raise RuntimeError("RAG system not initialized")
+            
+            # Ensure articles are loaded
+            await self.ensure_articles_loaded()
+            
             # Validate URL if topic is a URL
             if topic.startswith(('http://', 'https://')):
                 try:
@@ -346,11 +358,6 @@ class KidsNewsGenerator:
             
             logger.info(f"Using simplified topic: {topic}")
             
-            # Ensure RAG system is initialized and articles are loaded
-            if self.rag is None:
-                raise RuntimeError("RAG system not initialized")
-            await self.ensure_articles_loaded()
-            
             # Get feedback insights
             feedback_insights = self._get_feedback_insights(age_group)
             logger.info(f"Using feedback insights: {feedback_insights}")
@@ -367,7 +374,7 @@ class KidsNewsGenerator:
             for attempt in range(max_retries):
                 try:
                     logger.info(f"Searching for relevant documents (attempt {attempt + 1}/{max_retries})...")
-                    relevant_docs = await self.rag.search(topic, k=3)
+                    relevant_docs = self.rag.search(topic, k=3)
                     if relevant_docs:
                         logger.info(f"Found {len(relevant_docs)} relevant documents")
                         break
@@ -423,21 +430,21 @@ class KidsNewsGenerator:
                     Write a complete story for a child aged {age_group} about "{topic}" using these facts:
                     {context}
 
-                    STORY STARTS BELOW:
-                    The story must:
-                    1. Start with "Once upon a time" and introduce a friendly character
-                    2. Use very simple words and short sentences (3-5 words)
-                    3. Include basic emotions (happy, sad, excited)
-                    4. **Separate each paragraph with a blank line.**
-                    5. End with a happy conclusion and a simple lesson
-                    6. Make sure to complete the entire story before ending
-                    
-                    Write exactly 3 short paragraphs. Each paragraph should be 2-3 sentences.
-                    Use words that a {age_group}-year-old can understand.
-                    End with "Wasn't that fun?" or "The end!"
+                    Follow these instructions:
+                    1. Start with "Once upon a time" and introduce a friendly character  
+                    2. Use very simple words and short sentences (3–5 words)  
+                    3. Include basic emotions (happy, sad, excited)  
+                    4. Separate each paragraph with a blank line  
+                    5. End with a happy conclusion and a simple lesson  
+                    6. The last line should be: "Wasn't that fun?" or "The end!"  
+                    7. Make sure the story is complete  
 
+                    Write **exactly 3 paragraphs**. Each paragraph should have **2–3 sentences**.  
+                    Use only words that a {age_group}-year-old can understand.
 
+                    ### START OF STORY ###
                     """
+
 
                 elif 7 <= age_group <= 9:  # Early Elementary
                     prompt = f"""
@@ -446,19 +453,20 @@ class KidsNewsGenerator:
                     Write a complete story for a child aged {age_group} about "{topic}" using these facts:
                     {context}
 
-                    STORY STARTS BELOW:
-                    The story must:
-                    1. Start with an engaging opening and introduce the setting
-                    2. Use simple sentences (5-8 words) and basic vocabulary
-                    3. Include a character who learns something new
-                    4. Add one or two simple questions for the reader
-                    5. **Separate each paragraph with a blank line.**
-                    6. End with a satisfying conclusion and a clear lesson
-                    7. Make sure to complete the entire story before ending
-                    
-                    Write exactly 4 paragraphs. Each paragraph should be 3-4 sentences.
+                    The story must follow these rules:
+                    1. Start with an engaging opening and introduce the setting  
+                    2. Use simple sentences (5-8 words) and basic vocabulary  
+                    3. Include a character who learns something new  
+                    4. Add one or two simple questions for the reader  
+                    5. Separate each paragraph with a blank line  
+                    6. End with a satisfying conclusion and a clear lesson  
+                    7. Make sure to complete the entire story before ending  
+                    8. Include one "Did you know?" fact  
+
+                    Write exactly 4 paragraphs. Each paragraph should be 3–4 sentences.  
                     Use words that a {age_group}-year-old can understand.
-                    Include one "Did you know?" fact.
+
+                    ### START OF STORY ###
                     """
 
                 else:  # Upper Elementary (10-12)
@@ -468,19 +476,19 @@ class KidsNewsGenerator:
                     Write a complete story for a child aged {age_group} about "{topic}" using these facts:
                     {context}
 
-                    STORY STARTS BELOW:
                     The story must:
-                    1. Start with an interesting opening that grabs attention
-                    2. Set up the main character and their challenge
-                    3. Present the topic through an engaging narrative
-                    4. Include clear explanations of complex concepts
-                    5. **Separate each paragraph with a blank line.**
-                    6. End with a satisfying conclusion and key takeaways
-                    7. Make sure to complete the entire story before ending
+                    1. Start with an interesting opening that grabs attention  
+                    2. Set up the main character and their challenge  
+                    3. Present the topic through an engaging narrative  
+                    4. Include clear explanations of complex concepts  
+                    5. Separate each paragraph with a blank line  
+                    6. End with a satisfying conclusion and key takeaways  
+                    7. Make sure to complete the entire story before ending  
 
-                    Write exactly 5 paragraphs. Each paragraph should be 4-5 sentences.
-                    Separate each paragraph with a new line.
+                    Write exactly 5 paragraphs. Each paragraph should be 4-5 sentences.  
                     Use age-appropriate vocabulary for {age_group}-year-olds.
+
+                    ### START OF STORY ###
                     """
 
                 logger.info("Created age-appropriate prompt for model")
@@ -535,7 +543,7 @@ class KidsNewsGenerator:
             # Validate facts against news articles
             logger.info("Validating facts...")
             try:
-                validation_results = await self.rag.validate_facts(cleaned_text)
+                validation_results = self.rag.validate_facts(cleaned_text)
                 logger.info(f"Fact validation completed with score: {validation_results['overall_score']}")
             except Exception as e:
                 logger.error(f"Error during fact validation: {str(e)}")
@@ -637,7 +645,7 @@ class KidsNewsGenerator:
             category_dir = self.summaries_dir / category
             category_dir.mkdir(parents=True, exist_ok=True)
             
-            # Save summary
+            # Save summary with favorite status
             summary_path = category_dir / f"{safe_title}_{timestamp}.json"
             with open(summary_path, "w") as f:
                 json.dump({
@@ -648,6 +656,7 @@ class KidsNewsGenerator:
                     "age_group": article_data.get("age_group", 7),
                     "category": category,
                     "original_article": article_data,
+                    "is_favorite": False,  # Default favorite status
                     "rl_guidelines": self.rl_system.get_generation_guidelines(
                         article_data.get("age_group", 7),
                         category
@@ -658,6 +667,88 @@ class KidsNewsGenerator:
             
         except Exception as e:
             logger.error(f"Error saving summary: {str(e)}")
+            raise
+
+    def toggle_favorite(self, article_id: str, category: str) -> bool:
+        """Toggle the favorite status of an article.
+        
+        Args:
+            article_id: The ID of the article (filename without extension)
+            category: The category of the article
+            
+        Returns:
+            bool: The new favorite status
+        """
+        try:
+            # Construct the path to the article file
+            category_dir = self.summaries_dir / category.capitalize()
+            article_path = category_dir / f"{article_id}.json"
+            
+            if not article_path.exists():
+                logger.error(f"Article not found: {article_path}")
+                raise FileNotFoundError(f"Article not found: {article_id}")
+            
+            # Read the current article data
+            with open(article_path, "r") as f:
+                article_data = json.load(f)
+            
+            # Toggle the favorite status
+            article_data["is_favorite"] = not article_data.get("is_favorite", False)
+            
+            # Save the updated article data
+            with open(article_path, "w") as f:
+                json.dump(article_data, f, indent=2)
+            
+            logger.info(f"Toggled favorite status for article {article_id} to {article_data['is_favorite']}")
+            return article_data["is_favorite"]
+            
+        except Exception as e:
+            logger.error(f"Error toggling favorite status: {str(e)}")
+            raise
+
+    def get_favorite_articles(self, category: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get all favorite articles, optionally filtered by category.
+        
+        Args:
+            category: Optional category to filter favorites by
+            
+        Returns:
+            List[Dict[str, Any]]: List of favorite articles
+        """
+        try:
+            favorite_articles = []
+            
+            # Determine which categories to search
+            categories = [category.capitalize()] if category else [d.name for d in self.summaries_dir.iterdir() if d.is_dir()]
+            
+            for cat in categories:
+                category_dir = self.summaries_dir / cat
+                if not category_dir.exists():
+                    continue
+                
+                # Search through all JSON files in the category
+                for article_file in category_dir.glob("*.json"):
+                    try:
+                        with open(article_file, "r") as f:
+                            article_data = json.load(f)
+                            
+                            if article_data.get("is_favorite", False):
+                                # Add file information to the article data
+                                article_data["file_path"] = str(article_file)
+                                article_data["article_id"] = article_file.stem
+                                favorite_articles.append(article_data)
+                    except Exception as e:
+                        logger.error(f"Error reading article file {article_file}: {str(e)}")
+                        continue
+            
+            # Sort by timestamp (newest first)
+            favorite_articles.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+            
+            logger.info(f"Found {len(favorite_articles)} favorite articles")
+            return favorite_articles
+            
+        except Exception as e:
+            logger.error(f"Error getting favorite articles: {str(e)}")
             raise
 
     def update_with_feedback(self, feedback_data: Dict[str, Any]) -> None:

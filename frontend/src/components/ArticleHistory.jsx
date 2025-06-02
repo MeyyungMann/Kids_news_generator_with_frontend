@@ -5,10 +5,12 @@ const ArticleHistory = () => {
     const [articles, setArticles] = useState([]);
     const [selectedCategory, setSelectedCategory] = useState('all');
     const [selectedAgeGroup, setSelectedAgeGroup] = useState('all');
+    const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [showPrompts, setShowPrompts] = useState({});  // Track which articles show prompts
     const [deleteLoading, setDeleteLoading] = useState({});  // Track which articles are being deleted
+    const [favoriteLoading, setFavoriteLoading] = useState({});  // Track which articles are being favorited
 
     const categories = [
         { id: 'all', name: 'All Categories' },
@@ -28,14 +30,23 @@ const ArticleHistory = () => {
 
     useEffect(() => {
         fetchArticles();
-    }, [selectedCategory, selectedAgeGroup]);
+    }, [selectedCategory, selectedAgeGroup, showFavoritesOnly]);
 
     const fetchArticles = async () => {
         try {
             setLoading(true);
             setError(null);
             const response = await axios.get(`/api/articles/history?category=${selectedCategory}&age_group=${selectedAgeGroup}`);
-            const articlesData = response.data.articles || [];
+            let articlesData = response.data.articles || [];
+            
+            // Filter favorites if showFavoritesOnly is true
+            if (showFavoritesOnly) {
+                articlesData = articlesData.filter(article => article.is_favorite === true);
+            }
+            
+            // Sort articles by timestamp (newest first)
+            articlesData.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            
             setArticles(articlesData);
             
             // Initialize showPrompts state for new articles
@@ -83,20 +94,12 @@ const ArticleHistory = () => {
             .trim();
     };
 
-    const handleDelete = async (article, index) => {
+    const handleToggleFavorite = async (article, index) => {
         try {
-            setDeleteLoading(prev => ({ ...prev, [index]: true }));
-            
-            // Debug logging
-            console.log('Article data:', {
-                topic: article.topic,
-                timestamp: article.timestamp,
-                original_article: article.original_article
-            });
+            setFavoriteLoading(prev => ({ ...prev, [index]: true }));
             
             // Get the category from the article data
             const category = article.original_article?.category || article.original_article?.original_article?.category;
-            console.log('Extracted category:', category);
             
             if (!category) {
                 throw new Error('Category not found for article');
@@ -104,7 +107,53 @@ const ArticleHistory = () => {
             
             // Extract filename from the article data
             const filename = `${article.topic.replace(/[^a-zA-Z0-9]/g, '_')}_${article.timestamp}.json`;
-            console.log('Generated filename:', filename);
+            
+            // Call the toggle favorite endpoint
+            const response = await axios.post(`/api/articles/${category}/${filename}/favorite`);
+            const newFavoriteStatus = response.data.is_favorite;
+            
+            // Update the article's favorite status in the state
+            setArticles(prev => {
+                // First update the favorite status
+                const updatedArticles = prev.map((a, i) => 
+                    i === index ? { ...a, is_favorite: newFavoriteStatus } : a
+                );
+                
+                // If we're showing only favorites and the article was unfavorited, remove it from the list
+                if (showFavoritesOnly && !newFavoriteStatus) {
+                    return updatedArticles.filter((_, i) => i !== index);
+                }
+                
+                // Sort by timestamp (newest first)
+                return updatedArticles.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            });
+            
+            // If we're showing all articles and the article was favorited, we might want to show a success message
+            if (!showFavoritesOnly && newFavoriteStatus) {
+                console.log('Article added to favorites');
+            }
+            
+        } catch (err) {
+            console.error('Error toggling favorite:', err);
+            alert(err.message || 'Failed to toggle favorite status. Please try again.');
+        } finally {
+            setFavoriteLoading(prev => ({ ...prev, [index]: false }));
+        }
+    };
+
+    const handleDelete = async (article, index) => {
+        try {
+            setDeleteLoading(prev => ({ ...prev, [index]: true }));
+            
+            // Get the category from the article data
+            const category = article.original_article?.category || article.original_article?.original_article?.category;
+            
+            if (!category) {
+                throw new Error('Category not found for article');
+            }
+            
+            // Extract filename from the article data
+            const filename = `${article.topic.replace(/[^a-zA-Z0-9]/g, '_')}_${article.timestamp}.json`;
             
             // Call the delete endpoint
             await axios.delete(`/api/articles/${category}/${filename}`);
@@ -116,7 +165,6 @@ const ArticleHistory = () => {
             alert('Article deleted successfully');
         } catch (err) {
             console.error('Error deleting article:', err);
-            console.error('Article data:', article);
             alert(err.message || 'Failed to delete article. Please try again.');
         } finally {
             setDeleteLoading(prev => ({ ...prev, [index]: false }));
@@ -143,20 +191,33 @@ const ArticleHistory = () => {
                             </button>
                         ))}
                     </div>
-                    <div className="flex items-center gap-2">
-                        <label htmlFor="ageGroup" className="text-sm font-medium text-gray-700">Age Group:</label>
-                        <select
-                            id="ageGroup"
-                            value={selectedAgeGroup}
-                            onChange={(e) => setSelectedAgeGroup(e.target.value)}
-                            className="block w-40 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                            <label htmlFor="ageGroup" className="text-sm font-medium text-gray-700">Age Group:</label>
+                            <select
+                                id="ageGroup"
+                                value={selectedAgeGroup}
+                                onChange={(e) => setSelectedAgeGroup(e.target.value)}
+                                className="block w-40 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                            >
+                                {ageGroups.map(group => (
+                                    <option key={group.id} value={group.id}>
+                                        {group.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                        <button
+                            onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
+                            className={`px-4 py-2 rounded-full text-sm font-medium transition-colors flex items-center gap-2
+                                ${showFavoritesOnly
+                                    ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
+                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                }`}
                         >
-                            {ageGroups.map(group => (
-                                <option key={group.id} value={group.id}>
-                                    {group.name}
-                                </option>
-                            ))}
-                        </select>
+                            <span>{showFavoritesOnly ? '★' : '☆'}</span>
+                            {showFavoritesOnly ? 'Show All' : 'Show Favorites'}
+                        </button>
                     </div>
                 </div>
             </div>
@@ -179,6 +240,19 @@ const ArticleHistory = () => {
                         <div className="flex justify-between items-start mb-4">
                             <h3 className="text-xl font-semibold text-gray-800">{article.topic}</h3>
                             <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => handleToggleFavorite(article, index)}
+                                    disabled={favoriteLoading[index]}
+                                    className={`px-3 py-1 text-sm rounded-full transition-colors ${
+                                        favoriteLoading[index]
+                                            ? 'bg-gray-300 cursor-not-allowed'
+                                            : article.is_favorite
+                                                ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
+                                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                    }`}
+                                >
+                                    {favoriteLoading[index] ? 'Updating...' : article.is_favorite ? '★ Favorited' : '☆ Favorite'}
+                                </button>
                                 <button
                                     onClick={() => togglePrompts(index)}
                                     className="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-full transition-colors"
@@ -263,7 +337,7 @@ const ArticleHistory = () => {
 
             {!loading && articles.length === 0 && (
                 <div className="text-center py-8 text-gray-500">
-                    No articles found in this category.
+                    {showFavoritesOnly ? 'No favorite articles found.' : 'No articles found in this category.'}
                 </div>
             )}
         </div>

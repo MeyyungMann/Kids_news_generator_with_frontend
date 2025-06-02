@@ -74,7 +74,10 @@ async def startup_event():
         
         # Initialize handlers
         news_handler = NewsAPIHandler()
-        generator = KidsNewsGenerator()
+        generator = KidsNewsGenerator(
+            offline_mode=Config.OFFLINE_MODE,
+            skip_article_loading=Config.SKIP_ARTICLE_LOADING
+        )
         clip_handler = CLIPHandler()  # Initialize CLIP handler first
         image_generator = KidFriendlyImageGenerator(clip_handler=clip_handler)  # Pass the CLIP handler
         web_searcher = WebSearcher()
@@ -315,6 +318,7 @@ async def get_article_history(category: str = "all", age_group: str = "all") -> 
         
         # Get the summaries directory
         summaries_dir = Path(__file__).parent.parent / "results" / "summaries"
+        feedback_dir = Path(__file__).parent.parent / "data" / "feedback"
         
         # Initialize list to store articles
         articles = []
@@ -350,6 +354,18 @@ async def get_article_history(category: str = "all", age_group: str = "all") -> 
                         if image_file.exists():
                             image_path = f"/images/{cat}/{image_file.name}"
                         
+                        # Get feedback for this article
+                        feedback_data = None
+                        feedback_category_dir = feedback_dir / cat
+                        if feedback_category_dir.exists():
+                            # Look for feedback files that match the article ID
+                            feedback_files = list(feedback_category_dir.glob(f"{summary_file.stem}*.json"))
+                            if feedback_files:
+                                # Get the most recent feedback
+                                latest_feedback = max(feedback_files, key=lambda x: x.stat().st_mtime)
+                                with open(latest_feedback, 'r', encoding='utf-8') as f:
+                                    feedback_data = json.load(f)
+                        
                         # Create article object
                         article = {
                             "topic": summary_data.get("topic", ""),
@@ -358,7 +374,9 @@ async def get_article_history(category: str = "all", age_group: str = "all") -> 
                             "image_url": image_path,
                             "age_group": f"{summary_data.get('age_group', 7)}-{summary_data.get('age_group', 7) + 3}",
                             "combined_score": summary_data.get("safety_score", 0.0),
-                            "original_article": summary_data.get("original_article", {})
+                            "original_article": summary_data.get("original_article", {}),
+                            "feedback": feedback_data if feedback_data else None,
+                            "is_favorite": summary_data.get("is_favorite", False)  # Add favorite status
                         }
                         articles.append(article)
                 except Exception as e:
@@ -465,7 +483,8 @@ async def generate_from_url(request: Dict[str, Any]) -> Dict[str, Any]:
         
         # Generate kid-friendly content
         try:
-            result = generator.generate_news(
+            # Properly await the async generate_news function
+            result = await generator.generate_news(
                 topic=custom_article["title"],
                 age_group=age_group
             )
@@ -558,13 +577,16 @@ async def compute_similarity(request: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 # Add Feedback model
+class FeedbackItem(BaseModel):
+    feedback_type: str
+    rating: int  # 1-5
+    comments: Optional[str] = None
+
 class FeedbackRequest(BaseModel):
     article_id: str
     age_group: int
     category: str
-    feedback_type: str  # "age_appropriate", "engagement", "clarity"
-    rating: int  # 1-5
-    comments: Optional[str] = None
+    feedback: List[FeedbackItem]
 
 @app.post("/api/feedback")
 async def submit_feedback(request: FeedbackRequest) -> Dict[str, Any]:
@@ -580,36 +602,26 @@ async def submit_feedback(request: FeedbackRequest) -> Dict[str, Any]:
         category_dir = feedback_dir / request.category
         category_dir.mkdir(parents=True, exist_ok=True)
         
-        # Create or update feedback file
+        # Create feedback file
         feedback_file = category_dir / f"{request.article_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         
-        # Load existing feedback if file exists
-        feedback_data = {}
-        if feedback_file.exists():
-            with open(feedback_file, "r") as f:
-                feedback_data = json.load(f)
-        
-        # Initialize feedback structure if not exists
-        if "feedback" not in feedback_data:
-            feedback_data = {
-                "article_id": request.article_id,
-                "age_group": request.age_group,
-                "category": request.category,
-                "timestamp": datetime.now().isoformat(),
-                "feedback": {
-                    "age_appropriate": {"rating": None, "comments": None},
-                    "engagement": {"rating": None, "comments": None},
-                    "clarity": {"rating": None, "comments": None}
+        # Prepare feedback data
+        feedback_data = {
+            "article_id": request.article_id,
+            "age_group": request.age_group,
+            "category": request.category,
+            "timestamp": datetime.now().isoformat(),
+            "feedback": [
+                {
+                    "feedback_type": item.feedback_type,
+                    "rating": item.rating,
+                    "comments": item.comments
                 }
-            }
-        
-        # Update specific feedback type
-        feedback_data["feedback"][request.feedback_type] = {
-            "rating": request.rating,
-            "comments": request.comments
+                for item in request.feedback
+            ]
         }
         
-        # Save updated feedback
+        # Save feedback
         with open(feedback_file, "w") as f:
             json.dump(feedback_data, f, indent=2)
         
@@ -707,6 +719,25 @@ async def delete_article(category: str, filename: str):
         raise he
     except Exception as e:
         logger.error(f"Error deleting article: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/articles/{category}/{filename}/favorite")
+async def toggle_favorite(category: str, filename: str) -> Dict[str, Any]:
+    """Toggle the favorite status of an article."""
+    try:
+        # Get the article ID from the filename
+        article_id = Path(filename).stem
+        
+        # Toggle favorite status using the generator
+        is_favorite = generator.toggle_favorite(article_id, category)
+        
+        return {"is_favorite": is_favorite}
+        
+    except FileNotFoundError as e:
+        logger.error(f"Article not found: {str(e)}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error toggling favorite status: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

@@ -166,18 +166,21 @@ class RLSystem:
                             
                             # Process feedback for RL
                             age_group = str(feedback["age_group"])
-                            feedback_type = feedback["feedback_type"]
                             
-                            if age_group not in feedback_data[feedback_type]:
-                                feedback_data[feedback_type][age_group] = {
-                                    "ratings": [],
-                                    "comments": [],
-                                    "content_features": {}
-                                }
-                            
-                            feedback_data[feedback_type][age_group]["ratings"].append(feedback["rating"])
-                            if feedback.get("comments"):
-                                feedback_data[feedback_type][age_group]["comments"].append(feedback["comments"])
+                            # Handle nested feedback array
+                            for feedback_item in feedback.get("feedback", []):
+                                feedback_type = feedback_item["feedback_type"]
+                                
+                                if age_group not in feedback_data[feedback_type]:
+                                    feedback_data[feedback_type][age_group] = {
+                                        "ratings": [],
+                                        "comments": [],
+                                        "content_features": {}
+                                    }
+                                
+                                feedback_data[feedback_type][age_group]["ratings"].append(feedback_item["rating"])
+                                if feedback_item.get("comments"):
+                                    feedback_data[feedback_type][age_group]["comments"].append(feedback_item["comments"])
                     except Exception as e:
                         logger.error(f"Error loading feedback file {feedback_file}: {str(e)}")
                         continue
