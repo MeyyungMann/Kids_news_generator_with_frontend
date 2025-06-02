@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 import time
 import random
 from urllib.parse import quote_plus
+import json
 
 # Configure logging
 logging.basicConfig(
@@ -30,66 +31,102 @@ class WebSearcher:
     
     def search_articles(self, query: str, max_results: int = 5) -> List[Dict[str, Any]]:
         """
-        Search for articles using DuckDuckGo.
+        Search for articles using DuckDuckGo or process direct URLs.
         
         Args:
-            query: Search query
+            query: Search query or direct URL
             max_results: Maximum number of results to return
             
         Returns:
             List of article dictionaries
         """
         try:
-            logger.info(f"Searching for: {query}")
+            logger.info(f"Processing query/URL: {query}")
             
-            # Construct search URL
+            # Check if the input is a URL
+            if query.startswith(('http://', 'https://')):
+                try:
+                    # Direct URL processing
+                    content = self._extract_article_content(query)
+                    if content:
+                        # Extract title from URL or content
+                        title = query.split('/')[-1].replace('-', ' ').title()
+                        category = self._categorize_article(title + " " + content)
+                        
+                        return [{
+                            'title': title,
+                            'source': query.split('/')[2],
+                            'url': query,
+                            'content': content,
+                            'category': category,
+                            'published_at': None
+                        }]
+                    else:
+                        logger.error(f"Failed to extract content from URL: {query}")
+                        return []
+                except Exception as e:
+                    logger.error(f"Error processing URL {query}: {str(e)}")
+                    return []
+            
+            # If not a URL, proceed with DuckDuckGo search
+            try:
+                results = self._search_duckduckgo(query, max_results)
+                logger.info(f"Found {len(results)} articles")
+                return results
+            except Exception as e:
+                logger.error(f"Error in DuckDuckGo search: {str(e)}")
+                return []
+            
+        except Exception as e:
+            logger.error(f"Error in search: {str(e)}")
+            return []
+    
+    def _search_duckduckgo(self, query: str, max_results: int) -> List[Dict[str, Any]]:
+        """Search using DuckDuckGo's HTML search."""
+        try:
+            # Use DuckDuckGo's HTML search instead of API
             search_url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+            logger.info(f"Making request to DuckDuckGo HTML search: {search_url}")
             
-            # Add random delay to avoid rate limiting
-            time.sleep(random.uniform(1, 2))
-            
-            # Make request
-            response = self.session.get(search_url)
+            response = self.session.get(search_url, timeout=10)
             response.raise_for_status()
             
-            # Parse results
             soup = BeautifulSoup(response.text, 'html.parser')
             results = []
             
-            # Find all result elements - try multiple possible class names
-            result_elements = soup.find_all(['div', 'article'], class_=['result', 'result__body', 'article'])
+            # Find all result elements
+            result_elements = soup.find_all('div', class_='result')
+            logger.info(f"Number of results found: {len(result_elements)}")
             
             for result in result_elements:
                 try:
-                    # Extract title and link - try multiple possible class names
-                    title_elem = result.find(['a', 'h2'], class_=['result__a', 'result__title', 'article__title'])
+                    # Extract title and URL
+                    title_elem = result.find('a', class_='result__a')
                     if not title_elem:
                         continue
                         
                     title = title_elem.get_text(strip=True)
-                    url = title_elem.get('href')
+                    url = title_elem['href']
                     
-                    # Extract snippet - try multiple possible class names
-                    snippet_elem = result.find(['a', 'div'], class_=['result__snippet', 'result__description', 'article__description'])
+                    # Get snippet
+                    snippet_elem = result.find('a', class_='result__snippet')
                     snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
                     
-                    # Extract source - try multiple possible class names
-                    source_elem = result.find(['a', 'span'], class_=['result__url', 'result__domain', 'article__source'])
-                    source = source_elem.get_text(strip=True) if source_elem else "Unknown Source"
+                    logger.info(f"Found article: {title} - {url}")
                     
                     # Get full article content
-                    content = self._extract_article_content(url) if url else ""
+                    content = self._extract_article_content(url)
                     
                     # Categorize article
-                    category = self._categorize_article(title + " " + snippet)
+                    category = self._categorize_article(title + " " + content)
                     
                     results.append({
                         'title': title,
-                        'source': source,
+                        'source': url.split('/')[2],
                         'url': url,
                         'content': content,
                         'category': category,
-                        'published_at': None  # DuckDuckGo doesn't provide this
+                        'published_at': None
                     })
                     
                     if len(results) >= max_results:
@@ -99,11 +136,10 @@ class WebSearcher:
                     logger.warning(f"Error processing result: {str(e)}")
                     continue
             
-            logger.info(f"Found {len(results)} articles")
             return results
             
         except Exception as e:
-            logger.error(f"Error searching articles: {str(e)}")
+            logger.error(f"Error in DuckDuckGo search: {str(e)}")
             return []
     
     def _extract_article_content(self, url: str) -> str:
@@ -112,6 +148,7 @@ class WebSearcher:
             # Add random delay
             time.sleep(random.uniform(1, 2))
             
+            logger.info(f"Fetching content from URL: {url}")
             response = self.session.get(url, timeout=10)
             response.raise_for_status()
             
@@ -121,18 +158,32 @@ class WebSearcher:
             for element in soup.find_all(['script', 'style', 'nav', 'footer', 'header']):
                 element.decompose()
             
-            # Extract text from paragraphs
-            paragraphs = soup.find_all('p')
-            content = ' '.join(p.get_text(strip=True) for p in paragraphs)
+            # Try to find the main article content
+            article = soup.find('article') or soup.find('main') or soup.find('div', class_=['article', 'content', 'post'])
+            
+            if article:
+                # Extract text from paragraphs within the article
+                paragraphs = article.find_all('p')
+                content = ' '.join(p.get_text(strip=True) for p in paragraphs)
+                logger.info(f"Found article content with {len(paragraphs)} paragraphs")
+            else:
+                # Fallback to all paragraphs if no article container found
+                paragraphs = soup.find_all('p')
+                content = ' '.join(p.get_text(strip=True) for p in paragraphs)
+                logger.info(f"Using fallback content with {len(paragraphs)} paragraphs")
             
             # Limit content length
             if len(content) > 5000:
                 content = content[:5000] + "..."
             
+            if not content:
+                logger.warning(f"No content found for URL: {url}")
+                return ""
+            
             return content
             
         except Exception as e:
-            logger.warning(f"Error extracting content from {url}: {str(e)}")
+            logger.error(f"Error extracting content from {url}: {str(e)}")
             return ""
     
     def _categorize_article(self, text: str) -> str:
@@ -148,13 +199,13 @@ class WebSearcher:
     'AI', 'artificial intelligence', 'machine learning', 'robotics', 'smartphone', 'gadget',
     'internet', 'cybersecurity', 'cloud', 'data science', 'programming', 'code', 'startup', 'innovation'
 ],
-                'weight': 0.8  # Lower weight for common tech terms
+                'weight': 0.8
             },
             'health': {
                 'keywords': ['health', 'medical', 'medicine', 'disease', 'treatment', 'doctor', 'patient', 'mental health', 'therapy', 'psychologist', 'hospital', 'clinic', 'vaccine', 
     'symptoms', 'diagnosis', 'public health', 'nutrition', 'exercise', 'wellness', 
     'nurse', 'epidemic', 'pandemic', 'infection', 'surgery'],
-                'weight': 1.2  # Higher weight for health terms
+                'weight': 1.2
             },
             'environment': {
                 'keywords': ['environment', 'climate', 'nature', 'earth', 'pollution', 'sustainability', 'green',
@@ -176,23 +227,20 @@ class WebSearcher:
         max_score = 0
         best_category = 'general'
         
-        # First pass: count keyword matches
         for category, info in categories.items():
             matches = sum(1 for keyword in info['keywords'] if keyword in text)
             score = matches * info['weight']
             
-            # Additional context checks
             if category == 'health' and any(term in text for term in ['mental', 'psychology', 'therapy', 'counseling']):
-                score *= 1.5  # Boost health score for mental health content
+                score *= 1.5
                 
             if category == 'technology' and any(term in text for term in ['parenting', 'family', 'children', 'education']):
-                score *= 0.5  # Reduce tech score for family/education content
+                score *= 0.5
                 
             if score > max_score:
                 max_score = score
                 best_category = category
         
-        # Only return category if it has sufficient matches
         if max_score >= 2:
             return best_category
         

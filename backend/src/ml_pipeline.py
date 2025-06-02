@@ -604,37 +604,38 @@ class KidsNewsGenerator:
         
         # Split into paragraphs and clean each one
         paragraphs = text.split('\n\n')
-        cleaned_paragraphs = []
+        logger.info(f"Number of paragraphs before cleaning: {len(paragraphs)}")
         
-        for paragraph in paragraphs:
+        cleaned_paragraphs = []
+        for i, paragraph in enumerate(paragraphs):
             # Skip empty paragraphs
             if not paragraph.strip():
+                logger.info(f"Skipping empty paragraph {i+1}")
                 continue
             
-            # Skip paragraphs that are just instructions
+            # Only skip paragraphs that are clearly instructions
             if any(phrase in paragraph.lower() for phrase in [
-                'write', 'story', 'must', 'should', 'need to', 'have to',
-                'ensure', 'make sure', 'remember to', 'don\'t forget to',
-                'use', 'include', 'present', 'show', 'set up', 'explain',
-                'introduce', 'add', 'provide', 'follow', 'format', 'structure',
-                'guidelines', 'instructions', 'requirements', 'elements',
-                'content', 'markers', 'patterns', 'phrases', 'words',
-                'sentences', 'paragraphs', 'sections', 'parts', 'pieces',
-                'bits', 'chunks', 'blocks', 'segments', 'portions',
-                'fragments', 'snippets', 'excerpts', 'passages', 'texts',
-                'contents', 'materials', 'resources', 'sources', 'references',
-                'citations', 'quotes', 'facts', 'information', 'data',
-                'details', 'points', 'items', 'elements', 'components'
+                'write a story',
+                'must write',
+                'should write',
+                'need to write',
+                'have to write',
+                'format requirements',
+                'start of story',
+                'end of story'
             ]):
+                logger.info(f"Skipping instruction paragraph {i+1}: {paragraph[:100]}...")
                 continue
             
             # Clean up the paragraph
             paragraph = re.sub(r'\s+', ' ', paragraph).strip()
             if paragraph:
                 cleaned_paragraphs.append(paragraph)
+                logger.info(f"Keeping paragraph {i+1}: {paragraph[:100]}...")
         
         # Join paragraphs with double newlines
         cleaned_text = '\n\n'.join(cleaned_paragraphs)
+        logger.info(f"Number of paragraphs after cleaning: {len(cleaned_paragraphs)}")
         
         # Final cleanup
         cleaned_text = re.sub(r'\n\s*\n', '\n\n', cleaned_text)
