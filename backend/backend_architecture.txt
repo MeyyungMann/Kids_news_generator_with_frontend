@@ -1,0 +1,96 @@
+Backend Architecture (FastAPI)
+----------------------------
+API Layer
+---------
+|-- News Endpoints/
+|   |-- GET /api/news/{category}
+|   |-- GET /api/news/{category}/full/{article_id}
+|   |-- GET /api/articles/history
+|   |-- DELETE /api/articles/{category}/{filename}
+|   `-- POST /api/articles/{category}/{filename}/favorite
+|
+|-- Generation Endpoints/
+|   |-- POST /api/generate
+|   |-- POST /api/generate-from-url
+|   |-- POST /api/update-rag
+|   `-- POST /api/search-articles
+|
+|-- Feedback Endpoints/
+|   |-- POST /api/feedback
+|   |-- GET /api/feedback/history
+|   `-- POST /api/compute-similarity
+|
+|-- Utility Endpoints/
+|   |-- GET /
+|   `-- GET /api/categories
+
+Core Components
+--------------
+|-- News Generation/
+|   |-- KidsNewsGenerator (ml_pipeline.py)
+|   |   |-- Content Generation
+|   |   |-- Age Adaptation
+|   |   |-- RAG Integration
+|   |   `-- RL Integration
+|   |
+|   |-- NewsAPIHandler (news_api_handler.py)
+|   |   |-- Article Fetching
+|   |   |-- Content Processing
+|   |   `-- Category Management
+|   |
+|   `-- WebSearcher (web_search.py)
+|       |-- Content Extraction
+|       |-- URL Processing
+|       `-- Category Detection
+|
+|-- ML Systems/
+|   |-- RAG System (rag_system.py)
+|   |   |-- Document Indexing
+|   |   |-- Context Retrieval
+|   |   `-- Query Processing
+|   |
+|   |-- RL System (rl_system.py)
+|   |   |-- State Management
+|   |   |-- Reward Calculation
+|   |   `-- Policy Updates
+|   |
+|   `-- Image System
+|       |-- KidFriendlyImageGenerator (image_generator.py)
+|       |-- CLIPHandler (clip_handler.py)
+|       `-- Similarity Scoring
+
+Data Management
+--------------
+|-- Storage/
+|   |-- results/
+|   |   |-- summaries/
+|   |   `-- images/
+|   |
+|   |-- data/
+|   |   |-- feedback/
+|   |   `-- rag_documents/
+|   |
+|   `-- logs/
+|       |-- app_*.log
+|       `-- main_*.log
+|
+|-- Models/
+|   |-- LLM Models
+|   `-- CLIP Models
+
+Utilities
+---------
+|-- Configuration (config.py)
+|   |-- Environment Variables
+|   |-- API Keys
+|   `-- System Settings
+|
+|-- Logging (utils/logging_config.py)
+|   |-- Application Logger
+|   |-- Error Logger
+|   `-- Performance Logger
+|
+|-- Directory Management (utils/directory_manager.py)
+|   |-- Path Management
+|   |-- File Operations
+|   `-- Cleanup Tasks

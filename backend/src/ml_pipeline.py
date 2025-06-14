@@ -70,7 +70,8 @@ class KidsNewsGenerator:
     def _init_model(self):
         """Initialize the language model."""
         try:
-            model_path = Path(__file__).parent.parent / 'models'
+            # Use the model path from config
+            model_path = Path(Config.MODEL_PATH)
             logger.info(f"Loading local model from: {model_path}")
             
             # Check if model files exist
@@ -86,7 +87,7 @@ class KidsNewsGenerator:
             # Check for split model files
             model_files = list(model_path.glob('pytorch_model-*-of-*.bin'))
             if not model_files:
-                raise FileNotFoundError("No model files found")
+                raise FileNotFoundError(f"No model files found in {model_path}")
             
             logger.info(f"Found {len(model_files)} model files")
             
@@ -350,6 +351,10 @@ class KidsNewsGenerator:
                 topic = re.sub(r'\d+\.?\d*\s*billion', '', topic)  # Remove numbers
                 topic = re.sub(r'\b(urgent|warning|breaking|critical)\b', '', topic, flags=re.IGNORECASE)
                 topic = re.sub(r'\b(users|devices|technology)\b', '', topic, flags=re.IGNORECASE)
+                # Make it more engaging for young kids
+                topic = re.sub(r'\b(announces|reports|says|reveals)\b', 'shows', topic, flags=re.IGNORECASE)
+                topic = re.sub(r'\b(launches|introduces|develops)\b', 'makes', topic, flags=re.IGNORECASE)
+                topic = re.sub(r'\b(important|significant|major)\b', 'special', topic, flags=re.IGNORECASE)
                 topic = f"Fun Story About {topic}"
                 
             elif 7 <= age_group <= 9:  # Early Elementary
@@ -357,6 +362,10 @@ class KidsNewsGenerator:
                 topic = re.sub(r'\s*-\s*[^-]+$', '', topic)  # Remove source
                 topic = re.sub(r'\d+\.?\d*\s*billion', 'many', topic)  # Replace numbers
                 topic = re.sub(r'\b(urgent|warning|breaking)\b', 'important', topic, flags=re.IGNORECASE)
+                # Make it more engaging for elementary kids
+                topic = re.sub(r'\b(announces|reports|says|reveals)\b', 'tells us', topic, flags=re.IGNORECASE)
+                topic = re.sub(r'\b(launches|introduces|develops)\b', 'creates', topic, flags=re.IGNORECASE)
+                topic = re.sub(r'\b(important|significant|major)\b', 'big', topic, flags=re.IGNORECASE)
                 topic = f"Kids News: {topic}"
             
             logger.info(f"Using simplified topic: {topic}")
@@ -787,3 +796,67 @@ class KidsNewsGenerator:
         except Exception as e:
             logger.error(f"Error updating with feedback: {str(e)}")
             # Don't raise the error, just log it 
+
+    def extract_main_topic(self, content: str) -> str:
+        """Extract the main topic from the content."""
+        # Common topics and their related words
+        topics = {
+            'science': ['science', 'research', 'study', 'discovery', 'scientist', 'experiment', 'laboratory', 'physics', 'chemistry', 'biology', 'astronomy', 'genetics', 'microscope', 'data', 'analysis'],
+            'technology': ['tech', 'technology', 'digital', 'computer', 'software', 'hardware', 'app', 'platform', 'AI', 'artificial intelligence', 'machine learning', 'robotics', 'smartphone', 'gadget'],
+            'health': ['health', 'medical', 'medicine', 'disease', 'treatment', 'doctor', 'patient', 'mental health', 'therapy', 'psychologist', 'hospital', 'clinic', 'vaccine'],
+            'environment': ['environment', 'climate', 'nature', 'earth', 'pollution', 'sustainability', 'green', 'global warming', 'carbon', 'recycle', 'biodiversity', 'conservation', 'wildlife'],
+            'economy': ['economy', 'business', 'market', 'finance', 'money', 'investment', 'stock', 'trade', 'inflation', 'recession', 'budget', 'tax', 'bank']
+        }
+        
+        # Count occurrences of topic-related words
+        content_lower = content.lower()
+        topic_counts = {
+            topic: sum(1 for word in words if word in content_lower)
+            for topic, words in topics.items()
+        }
+        
+        # Get the most frequent topic
+        if topic_counts:
+            main_topic = max(topic_counts.items(), key=lambda x: x[1])[0]
+            return main_topic.capitalize()
+        
+        # If no clear topic, use the first sentence of the content
+        first_sentence = content.split('.')[0]
+        return first_sentence[:50]  # Limit length 
+
+    def transform_title_for_age_group(self, title: str, content: str, age_group: int) -> str:
+        """Transform article title based on age group and content."""
+        # First, extract the main topic from the content
+        main_topic = self.extract_main_topic(content)
+        
+        if 3 <= age_group <= 6:  # Preschool
+            # For very young kids, create a simple, engaging title
+            if "job" in main_topic.lower() or "work" in main_topic.lower():
+                return f"Fun Story About People and Their Jobs"
+            elif "money" in main_topic.lower() or "price" in main_topic.lower():
+                return f"Fun Story About Money and Shopping"
+            elif "school" in main_topic.lower() or "learn" in main_topic.lower():
+                return f"Fun Story About Learning and School"
+            elif "animal" in main_topic.lower() or "pet" in main_topic.lower():
+                return f"Fun Story About Animals"
+            elif "space" in main_topic.lower() or "planet" in main_topic.lower():
+                return f"Fun Story About Space and Stars"
+            else:
+                return f"Fun Story About {main_topic}"
+                
+        elif 7 <= age_group <= 9:  # Early Elementary
+            # For elementary kids, create an informative but simple title
+            if "job" in main_topic.lower() or "work" in main_topic.lower():
+                return f"Kids News: What's Happening with Jobs?"
+            elif "money" in main_topic.lower() or "price" in main_topic.lower():
+                return f"Kids News: Money Matters"
+            elif "school" in main_topic.lower() or "learn" in main_topic.lower():
+                return f"Kids News: Learning Something New"
+            elif "animal" in main_topic.lower() or "pet" in main_topic.lower():
+                return f"Kids News: Amazing Animals"
+            elif "space" in main_topic.lower() or "planet" in main_topic.lower():
+                return f"Kids News: Space Adventures"
+            else:
+                return f"Kids News: {main_topic}"
+        
+        return title  # Keep original for ages 10-12 

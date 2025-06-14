@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import logging
 import argparse
 import sys
@@ -14,8 +13,8 @@ import requests
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import json
 import torch
+from config import Config
 
-# Load environment variables from .env file
 load_dotenv()
 
 # Configure logging
@@ -102,11 +101,6 @@ def setup_environment():
         if not hasattr(sys, 'real_prefix') and not hasattr(sys, 'base_prefix'):
             logger.warning("Not running in a virtual environment. It's recommended to use one.")
         
-        # Create necessary directories
-        Path("results").mkdir(exist_ok=True)
-        Path("logs").mkdir(exist_ok=True)
-        Path("models").mkdir(exist_ok=True)
-        
         # Check internet connection
         if not check_internet_connection():
             logger.warning("No internet connection. Will try to use cached models.")
@@ -119,36 +113,25 @@ def setup_environment():
 
 def verify_model_exists():
     """Verify if the model exists in the correct location."""
-    # Check the Hugging Face cache location
-    model_paths = [
-        Path("models/models--mistralai--Mistral-7B-Instruct-v0.2/snapshots/latest"),
-        Path("models/mistral_local"),
-        Path("models/models--mistralai--Mistral-7B-Instruct-v0.2")
-    ]
+    # Use paths from Config
+    model_paths = [Path(Config.MODELS_DIR / path) for path in Config.MODEL_PATHS]
     
     for model_path in model_paths:
         if model_path.exists():
             logger.info(f"Found model in: {model_path}")
-            # Set the model path as an environment variable for the KidsNewsGenerator
-            os.environ["MODEL_PATH"] = str(model_path)
+            # Update Config's MODEL_PATH instead of environment variable
+            Config.MODEL_PATH = str(model_path)
             return True
     
-    logger.error("""
+    logger.error(f"""
 Model not found in any of the expected locations. Please ensure the model files are in one of these locations:
-- models/models--mistralai--Mistral-7B-Instruct-v0.2/snapshots/latest
-- models/mistral_local
-- models/models--mistralai--Mistral-7B-Instruct-v0.2
+{chr(10).join(f'- {path}' for path in Config.MODEL_PATHS)}
 """)
     return False
 
 async def run_pipeline(args):
     """Run the news generation pipeline."""
     try:
-        # Verify model exists first
-        if not verify_model_exists():
-            logger.error("Cannot proceed without model. Please download the model first.")
-            return []
-
         has_internet = check_internet_connection()
         if not has_internet:
             logger.warning("No internet connection. Will try to use cached models.")
@@ -269,7 +252,7 @@ def run_diagnostics():
         logger.error(f"Error running diagnostics: {str(e)}")
         input("\nPress Enter to continue...")
 
-async def run_pipeline_with_category(category: str, offline_mode: bool = False):
+async def run_pipeline_with_category(category: str):
     """Run pipeline for a specific category."""
     try:
         # Get age group selection
@@ -278,21 +261,13 @@ async def run_pipeline_with_category(category: str, offline_mode: bool = False):
         # Adjust content based on age group using consistent ranges
         if 3 <= age_group <= 6:  # Preschool (3-6)
             max_articles = 2  # Fewer articles for younger children
-            max_length = 200  # Shorter content
-            temperature = 0.8  # More creative
         elif 7 <= age_group <= 9:  # Early Elementary (7-9)
             max_articles = 3
-            max_length = 512
-            temperature = 0.7
         elif 10 <= age_group <= 12:  # Upper Elementary (10-12)
             max_articles = 3
-            max_length = 512
-            temperature = 0.7
         else:
             # Default to middle range if age group is invalid
             max_articles = 3
-            max_length = 512
-            temperature = 0.7
         
         # Map age group to reading level using consistent ranges
         if 3 <= age_group <= 6:
@@ -309,9 +284,7 @@ async def run_pipeline_with_category(category: str, offline_mode: bool = False):
             age_group=age_group,
             max_articles=max_articles,
             days=3,
-            offline=offline_mode,
-            max_length=max_length,
-            temperature=temperature
+            offline=False
         )
         
         # Check if model exists
@@ -321,9 +294,9 @@ async def run_pipeline_with_category(category: str, offline_mode: bool = False):
         
         # Check internet connection
         has_internet = check_internet_connection()
-        if not has_internet and not offline_mode:
+        if not has_internet:
             logger.warning("No internet connection. Switching to offline mode...")
-            offline_mode = True
+            args.offline = True
         
         # Run pipeline
         results = await run_pipeline(args)

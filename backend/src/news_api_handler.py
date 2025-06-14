@@ -109,6 +109,18 @@ class NewsAPIHandler:
         self.rag_documents_dir = Path(__file__).parent.parent / "data" / "rag_documents"
         self.rag_documents_dir.mkdir(parents=True, exist_ok=True)
     
+    def normalize_category(self, category: str) -> str:
+        """Normalize category name to match backend expectations."""
+        if category.lower() == "all":
+            return "all"
+        # Capitalize first letter of each word
+        normalized = " ".join(word.capitalize() for word in category.split())
+        # Validate against known categories
+        if normalized not in self.category_mapping and normalized != "all":
+            logger.warning(f"Unknown category: {normalized}, defaulting to 'Science'")
+            return "Science"
+        return normalized
+    
     async def fetch_articles(
         self,
         category: str = "general",
@@ -210,69 +222,98 @@ class NewsAPIHandler:
             return None
     
     async def _extract_main_content(self, url: str) -> Optional[str]:
-        """Extract main content from article URL."""
-        try:
-            logger.info(f"Attempting to extract content from URL: {url}")
-            async with aiohttp.ClientSession() as session:
-                # Add headers to mimic a browser request
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                }
-                
-                async with session.get(url, headers=headers) as response:
-                    if response.status != 200:
-                        logger.error(f"Failed to fetch URL, status code: {response.status}")
-                        # Return a fallback message instead of None
-                        return f"Article content could not be accessed (Status: {response.status}). Please visit the source website for the full article."
-                    
-                    html = await response.text()
-                    logger.info(f"Successfully fetched HTML, length: {len(html)}")
-                    
-                    soup = BeautifulSoup(html, 'html.parser')
-                    
-                    # Remove unwanted elements
-                    for element in soup.find_all(['script', 'style', 'nav', 'footer', 'header']):
-                        element.decompose()
-                    
-                    # Try to find the main article content
-                    article_content = None
-                    
-                    # Try common article content containers
-                    content_divs = soup.find_all(['article', 'div'], class_=re.compile(r'article|content|post|story'))
-                    
-                    if content_divs:
-                        logger.info(f"Found {len(content_divs)} potential content divs")
-                        # Get the largest content div
-                        content_div = max(content_divs, key=lambda x: len(x.get_text()))
-                        article_content = content_div.get_text(separator='\n', strip=True)
-                        logger.info(f"Extracted content from div, length: {len(article_content)}")
-                    else:
-                        logger.warning("No content divs found, falling back to paragraph text")
-                        # Fallback to all paragraphs
-                        paragraphs = soup.find_all('p')
-                        if paragraphs:
-                            article_content = '\n\n'.join(p.get_text(strip=True) for p in paragraphs)
-                            logger.info(f"Extracted content from paragraphs, length: {len(article_content)}")
-                        else:
-                            logger.warning("No paragraphs found, falling back to body text")
-                            article_content = soup.body.get_text(separator='\n', strip=True)
-                            logger.info(f"Extracted content from body, length: {len(article_content)}")
-                    
-                    if not article_content:
-                        logger.error("No content could be extracted")
-                        return "Article content could not be extracted. Please visit the source website for the full article."
-                    
-                    # Clean up the content
-                    article_content = re.sub(r'\n\s*\n', '\n\n', article_content)  # Remove extra newlines
-                    article_content = re.sub(r'\[.*?\]', '', article_content)  # Remove [text] patterns
-                    article_content = re.sub(r'\+.*?chars', '', article_content)  # Remove [+N chars]
-                    
-                    logger.info(f"Final cleaned content length: {len(article_content)}")
-                    return article_content.strip()
-                    
-        except Exception as e:
-            logger.error(f"Error extracting content from {url}: {str(e)}")
-            return f"Article content could not be accessed due to an error. Please visit the source website for the full article."
+        """Extract main content from article URL with timeout and retries."""
+        # Skip known problematic domains
+        problematic_domains = ['investors.micron.com', 'barrons.com', 'marketwatch.com']
+        if any(domain in url for domain in problematic_domains):
+            logger.warning(f"Skipping problematic domain: {url}")
+            return None
+
+        # Browser-like headers
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Connection': 'keep-alive',
+        }
+
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                timeout = aiohttp.ClientTimeout(total=5)  # Reduced timeout to 5 seconds
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    try:
+                        async with session.get(url, headers=headers) as response:
+                            if response.status == 200:
+                                html = await response.text()
+                                logger.info(f"Successfully fetched HTML, length: {len(html)}")
+                                
+                                soup = BeautifulSoup(html, 'html.parser')
+                                
+                                # Remove unwanted elements
+                                for element in soup.find_all(['script', 'style', 'nav', 'footer', 'header']):
+                                    element.decompose()
+                                
+                                # Try to find the main article content
+                                article_content = None
+                                
+                                # Try common article content containers
+                                content_divs = soup.find_all(['article', 'div'], class_=re.compile(r'article|content|post|story'))
+                                
+                                if content_divs:
+                                    logger.info(f"Found {len(content_divs)} potential content divs")
+                                    # Get the largest content div
+                                    content_div = max(content_divs, key=lambda x: len(x.get_text()))
+                                    article_content = content_div.get_text(separator='\n', strip=True)
+                                    logger.info(f"Extracted content from div, length: {len(article_content)}")
+                                else:
+                                    logger.warning("No content divs found, falling back to paragraph text")
+                                    # Fallback to all paragraphs
+                                    paragraphs = soup.find_all('p')
+                                    if paragraphs:
+                                        article_content = '\n\n'.join(p.get_text(strip=True) for p in paragraphs)
+                                        logger.info(f"Extracted content from paragraphs, length: {len(article_content)}")
+                                    else:
+                                        logger.warning("No paragraphs found, falling back to body text")
+                                        article_content = soup.body.get_text(separator='\n', strip=True)
+                                        logger.info(f"Extracted content from body, length: {len(article_content)}")
+                                
+                                if not article_content:
+                                    logger.error("No content could be extracted")
+                                    return "Article content could not be extracted. Please visit the source website for the full article."
+                                
+                                # Clean up the content
+                                article_content = re.sub(r'\n\s*\n', '\n\n', article_content)  # Remove extra newlines
+                                article_content = re.sub(r'\[.*?\]', '', article_content)  # Remove [text] patterns
+                                article_content = re.sub(r'\+.*?chars', '', article_content)  # Remove [+N chars]
+                                
+                                logger.info(f"Final cleaned content length: {len(article_content)}")
+                                return article_content.strip()
+                            else:
+                                logger.error(f"Failed to fetch URL, status code: {response.status}")
+                                if attempt < max_retries - 1:
+                                    await asyncio.sleep(1)  # Wait before retry
+                                    continue
+                                return None
+                    except asyncio.TimeoutError:
+                        logger.error(f"Timeout while fetching URL: {url}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(1)
+                            continue
+                        return None
+                    except Exception as e:
+                        logger.error(f"Error fetching URL: {str(e)}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(1)
+                            continue
+                        return None
+            except Exception as e:
+                logger.error(f"Error in _extract_main_content: {str(e)}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1)
+                    continue
+                return None
+        return None
     
     def _validate_article_content(self, article: Dict[str, Any], category: str) -> bool:
         """Validate article content for specific category requirements."""

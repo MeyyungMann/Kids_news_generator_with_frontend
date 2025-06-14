@@ -1,8 +1,0 @@
-{
-  "prompt": "Create a kid-friendly illustration about Environment. Generate a kid-friendly news article about Environment for children aged 7.\nContext: ['Title: Scienc... Style: colorful cartoon style, fun characters, educational illustration, kid-friendly, educational, safe for children",
-  "negative_prompt": "scary, violent, inappropriate, complex, realistic, photorealistic, dark, scary, frightening",
-  "age_group": 7,
-  "topic": "Environment",
-  "timestamp": "20250527_092723",
-  "image_path": "results\\images\\Environment_20250527_092723.png"
-}

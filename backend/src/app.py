@@ -18,6 +18,8 @@ from fastapi.staticfiles import StaticFiles
 from web_search import WebSearcher
 from clip_handler import CLIPHandler
 import os
+import re
+from contextlib import asynccontextmanager
 
 # Configure logging
 logging.basicConfig(
@@ -26,8 +28,38 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
-app = FastAPI(title="Kids News Generator API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize components on startup and cleanup on shutdown."""
+    try:
+        # Validate environment variables
+        Config.validate()
+        
+        # Initialize handlers
+        global news_handler, generator, image_generator, web_searcher, clip_handler
+        news_handler = NewsAPIHandler()
+        generator = KidsNewsGenerator(
+            offline_mode=Config.OFFLINE_MODE,
+            skip_article_loading=Config.SKIP_ARTICLE_LOADING
+        )
+        clip_handler = CLIPHandler()  # Initialize CLIP handler first
+        image_generator = KidFriendlyImageGenerator(clip_handler=clip_handler)  # Pass the CLIP handler
+        web_searcher = WebSearcher()
+        
+        # Mount static files
+        results_dir = Path(__file__).parent.parent / "results"
+        images_dir = results_dir / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        app.mount("/images", StaticFiles(directory=str(images_dir)), name="images")
+        
+        logger.info("Application startup completed successfully")
+        yield
+    except Exception as e:
+        logger.error(f"Error during startup: {str(e)}")
+        raise
+
+# Create FastAPI app with lifespan
+app = FastAPI(title="Kids News Generator API", lifespan=lifespan)
 
 # Configure CORS
 app.add_middleware(
@@ -54,7 +86,7 @@ def create_directories():
     summaries_dir = results_dir / "summaries"
     
     # Create category directories
-    categories = ["Science", "Technology", "Environment", "Health", "Economy"]
+    categories = list(news_handler.category_mapping.keys()) if news_handler else ["Science", "Technology", "Health", "Environment", "Economy"]
     for category in categories:
         (images_dir / category).mkdir(parents=True, exist_ok=True)
         (summaries_dir / category).mkdir(parents=True, exist_ok=True)
@@ -63,38 +95,6 @@ def create_directories():
 
 # Call this before creating the FastAPI app
 results_dir, images_dir, summaries_dir = create_directories()
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize components on startup."""
-    global news_handler, generator, image_generator, web_searcher, clip_handler
-    try:
-        # Validate environment variables
-        Config.validate()
-        
-        # Initialize handlers
-        news_handler = NewsAPIHandler()
-        generator = KidsNewsGenerator(
-            offline_mode=Config.OFFLINE_MODE,
-            skip_article_loading=Config.SKIP_ARTICLE_LOADING
-        )
-        clip_handler = CLIPHandler()  # Initialize CLIP handler first
-        image_generator = KidFriendlyImageGenerator(clip_handler=clip_handler)  # Pass the CLIP handler
-        web_searcher = WebSearcher()
-        
-        # Mount static files
-        results_dir = Path(__file__).parent.parent / "results"
-        images_dir = results_dir / "images"
-        images_dir.mkdir(parents=True, exist_ok=True)
-        app.mount("/images", StaticFiles(directory=str(images_dir)), name="images")
-        
-        logger.info("Application startup completed successfully")
-    except Exception as e:
-        logger.error(f"Error during startup: {str(e)}")
-        raise
-
-# Define valid categories
-CATEGORIES = ["Science", "Technology", "Health", "Environment", "Economy"]
 
 def normalize_category(category: str) -> str:
     """Normalize category name to match backend expectations."""
@@ -117,6 +117,43 @@ class WebSearchRequest(BaseModel):
 # Initialize web searcher
 web_searcher = WebSearcher()
 
+def transform_title_for_age_group(title: str, content: str, age_group: int) -> str:
+    """Transform article title based on age group and content."""
+    # First, extract the main topic from the content
+    main_topic = generator.extract_main_topic(content)
+    
+    if 3 <= age_group <= 6:  # Preschool
+        # For very young kids, create a simple, engaging title
+        if "job" in main_topic.lower() or "work" in main_topic.lower():
+            return f"Fun Story About People and Their Jobs"
+        elif "money" in main_topic.lower() or "price" in main_topic.lower():
+            return f"Fun Story About Money and Shopping"
+        elif "school" in main_topic.lower() or "learn" in main_topic.lower():
+            return f"Fun Story About Learning and School"
+        elif "animal" in main_topic.lower() or "pet" in main_topic.lower():
+            return f"Fun Story About Animals"
+        elif "space" in main_topic.lower() or "planet" in main_topic.lower():
+            return f"Fun Story About Space and Stars"
+        else:
+            return f"Fun Story About {main_topic}"
+            
+    elif 7 <= age_group <= 9:  # Early Elementary
+        # For elementary kids, create an informative but simple title
+        if "job" in main_topic.lower() or "work" in main_topic.lower():
+            return f"Kids News: What's Happening with Jobs?"
+        elif "money" in main_topic.lower() or "price" in main_topic.lower():
+            return f"Kids News: Money Matters"
+        elif "school" in main_topic.lower() or "learn" in main_topic.lower():
+            return f"Kids News: Learning Something New"
+        elif "animal" in main_topic.lower() or "pet" in main_topic.lower():
+            return f"Kids News: Amazing Animals"
+        elif "space" in main_topic.lower() or "planet" in main_topic.lower():
+            return f"Kids News: Space Adventures"
+        else:
+            return f"Kids News: {main_topic}"
+    
+    return title  # Keep original for ages 10-12
+
 @app.post("/api/generate")
 async def generate_article(request: GenerateRequest) -> Dict[str, Any]:
     """Generate a kid-friendly article."""
@@ -131,7 +168,7 @@ async def generate_article(request: GenerateRequest) -> Dict[str, Any]:
         logger.info("Loading articles into RAG system...")
         generator.rag.load_news_articles()
         
-        # First, fetch a real news article
+        # Fetch a real news article
         articles = await news_handler.fetch_articles(
             category=normalized_category,
             days=1,
@@ -151,13 +188,18 @@ async def generate_article(request: GenerateRequest) -> Dict[str, Any]:
             }
         else:
             original_article = articles[0]
+            # Transform the title based on age group and content
+            original_article["title"] = transform_title_for_age_group(
+                original_article["title"],
+                original_article["content"],
+                request.age_group
+            )
             topic = original_article["title"]
         
         logger.info(f"Using topic for generation: {topic}")
         
         # Generate kid-friendly version
         try:
-            # Properly await the async generate_news function
             result = await generator.generate_news(
                 topic=topic,
                 age_group=request.age_group
@@ -187,7 +229,7 @@ async def generate_article(request: GenerateRequest) -> Dict[str, Any]:
                 logger.error(f"Error generating image: {str(e)}")
                 # Continue without image if generation fails
         
-        # Create a summary object
+        # Create a summary
         summary_data = {
             "title": topic,
             "category": normalized_category,
@@ -207,7 +249,7 @@ async def generate_article(request: GenerateRequest) -> Dict[str, Any]:
         
         # Prepare the response
         response = {
-            "title": topic,
+            "title": original_article["title"],
             "content": result["text"],
             "category": normalized_category,
             "reading_level": f"Ages {request.age_group}-{request.age_group + 3}",
@@ -229,7 +271,8 @@ async def generate_article(request: GenerateRequest) -> Dict[str, Any]:
 @app.get("/")
 async def root():
     """Root endpoint to verify server is running."""
-    return {"message": "Server is running", "categories": CATEGORIES}
+    categories = list(news_handler.category_mapping.keys()) if news_handler else ["Science", "Technology", "Health", "Environment", "Economy"]
+    return {"message": "Server is running", "categories": categories}
 
 @app.get("/api/news/{category}")
 async def get_news(category: str) -> Dict[str, Any]:
@@ -238,11 +281,12 @@ async def get_news(category: str) -> Dict[str, Any]:
     
     try:
         # Normalize category
-        normalized_category = normalize_category(category)
+        normalized_category = news_handler.normalize_category(category)
         logger.info(f"Normalized category: {normalized_category}")
         
         # Validate category
-        if normalized_category not in CATEGORIES and normalized_category != "all":
+        valid_categories = list(news_handler.category_mapping.keys()) if news_handler else ["Science", "Technology", "Health", "Environment", "Economy"]
+        if normalized_category not in valid_categories and normalized_category != "all":
             return {"articles": []}  # Return empty list for invalid category
         
         # Fetch articles using NewsAPIHandler
@@ -277,23 +321,25 @@ async def get_news(category: str) -> Dict[str, Any]:
         return {"articles": processed_articles}
         
     except Exception as e:
-        logger.error(f"Error fetching news for category {normalized_category}: {str(e)}")
-        return {"articles": []}  # Return empty list instead of raising error
+        logger.error(f"Error fetching news: {str(e)}")
+        return {"articles": []}
 
 @app.get("/api/news/{category}/full/{article_id}")
 async def get_full_article(category: str, article_id: str) -> Dict[str, Any]:
     """Get full content of a specific article."""
     try:
         # Validate category
-        if category not in CATEGORIES:
+        normalized_category = news_handler.normalize_category(category)
+        valid_categories = list(news_handler.category_mapping.keys()) if news_handler else ["Science", "Technology", "Health", "Environment", "Economy"]
+        if normalized_category not in valid_categories:
             raise HTTPException(
                 status_code=400, 
-                detail=f"Invalid category. Must be one of: {', '.join(CATEGORIES)}"
+                detail=f"Invalid category. Must be one of: {', '.join(valid_categories)}"
             )
         
         # Fetch articles
         articles = await news_handler.fetch_articles(
-            category=category,
+            category=normalized_category,
             days=1,
             max_articles=5
         )
@@ -311,7 +357,7 @@ async def get_full_article(category: str, article_id: str) -> Dict[str, Any]:
             "url": article.get("url", ""),
             "published_at": article.get("published_at", ""),
             "content": article.get("content", ""),
-            "category": category,
+            "category": normalized_category,
             "description": article.get("description", ""),
             "image_url": article.get("urlToImage", None)
         }
@@ -323,7 +369,7 @@ async def get_full_article(category: str, article_id: str) -> Dict[str, Any]:
 @app.get("/api/categories")
 async def get_categories() -> List[str]:
     """Get list of available categories."""
-    return CATEGORIES
+    return list(news_handler.category_mapping.keys()) if news_handler else ["Science", "Technology", "Health", "Environment", "Economy"]
 
 @app.get("/api/articles/history")
 async def get_article_history(category: str = "all", age_group: str = "all") -> Dict[str, Any]:
@@ -344,7 +390,7 @@ async def get_article_history(category: str = "all", age_group: str = "all") -> 
         
         # If category is "all", search in all category directories
         if normalized_category.lower() == "all":
-            categories = CATEGORIES
+            categories = list(news_handler.category_mapping.keys()) if news_handler else ["Science", "Technology", "Health", "Environment", "Economy"]
         else:
             categories = [normalized_category]
         
@@ -417,7 +463,7 @@ async def update_rag_system():
     """Update the RAG system with new articles."""
     try:
         logger.info("Updating RAG system with new articles...")
-        for category in CATEGORIES:
+        for category in list(news_handler.category_mapping.keys()) if news_handler else ["Science", "Technology", "Health", "Environment", "Economy"]:
             try:
                 articles = await news_handler.fetch_articles(
                     category=category,

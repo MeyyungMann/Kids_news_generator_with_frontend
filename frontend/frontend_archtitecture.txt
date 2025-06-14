@@ -1,0 +1,69 @@
+Frontend Architecture (React)
+----------------------------
+Pages
+-----
+|-- Home (/)
+|   |-- Category Selection
+|   `-- News Feed
+|
+|-- Article (/article/:id)
+|   |-- Content Display
+|   `-- Feedback Form
+|
+|-- Generate (/generate)
+|   |-- Topic Input
+|   `-- Age Group Selection
+|
+|-- History (/history)
+|   |-- Article List
+|   `-- Filters
+
+Components
+---------
+|-- Article Components/
+|   |-- ArticleCard
+|   |-- ArticleDetail
+|   `-- ArticleList
+|
+|-- Feedback Components/
+|   |-- FeedbackForm
+|   `-- RatingSystem
+|
+|-- Search Components/
+|   |-- WebSearch
+|   `-- SearchBar
+|
+|-- History Components/
+|   |-- ArticleHistory
+|   `-- HistoryFilters
+
+API Integration
+--------------
+|-- API Services/
+|   |-- News API
+|   |-- Image API
+|   `-- User API
+|
+|-- API Hooks/
+|   |-- useFetch
+|   `-- useMutation
+
+State Management
+---------------
+|-- Context/
+|   |-- NewsContext
+|   `-- UserContext
+|
+|-- Reducers/
+|   |-- newsReducer
+|   `-- userReducer
+
+Styling
+-------
+|-- Global Styles/
+|   |-- index.css
+|   `-- App.css
+|
+|-- Component Styles/
+|   |-- Module CSS
+|   `-- Material-UI

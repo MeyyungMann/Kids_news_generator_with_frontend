@@ -1,6 +1,0 @@
-RAG system
-Implement a proper RAG system using a document store (like FAISS or Chroma)
-Add fact validation against reliable sources
-Include fact checking in the generation pipeline
-Store validation results in the summary files
-Add confidence scores for generated facts
